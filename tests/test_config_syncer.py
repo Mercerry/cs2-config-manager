@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from config_syncer import (
     _backup_path,
     apply_saved_profile_configs,
+    backup_account_configs,
     list_saved_profiles,
     save_profile_configs,
     sync_configs,
@@ -217,6 +218,28 @@ class TestSyncConfigs(unittest.TestCase):
         profiles = list_saved_profiles(storage_root)
         self.assertGreaterEqual(len(profiles), 1)
         self.assertEqual(profiles[0]["name"], "My_Profile")
+
+    def test_backup_account_configs_with_dated_label(self):
+        src = _make_account(self._tmpdir, "150")
+        (Path(src["cs2_cfg_path"]) / "autoexec.cfg").write_text("echo backup\n", encoding="utf-8")
+
+        backup_root = Path(self._tmpdir) / "account-backups"
+        results = backup_account_configs(
+            account=src,
+            file_groups=["Autoexec (autoexec.cfg)", "Game Config (config.cfg)"],
+            group_definitions=CONFIG_FILE_GROUPS,
+            backup_root=backup_root,
+            backup_label="20260508",
+        )
+
+        backup_dir = backup_root / "150" / "20260508"
+        backed_up_file = backup_dir / "cs2_cfg_path" / "autoexec.cfg"
+        self.assertTrue(backed_up_file.is_file())
+        self.assertEqual(backed_up_file.read_text(encoding="utf-8"), "echo backup\n")
+        self.assertEqual(results["backup_dir"], str(backup_dir))
+        self.assertEqual(len(results["copied"]), 1)
+        self.assertEqual(len(results["skipped"]), 1)
+        self.assertEqual(len(results["failed"]), 0)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,67 @@ def _backup_path(dest: Path) -> Path:
     return dest.with_name(f"{dest.name}.bak_{ts}")
 
 
+def backup_account_configs(
+    account: dict,
+    file_groups: list[str],
+    group_definitions: dict,
+    backup_root: Path | str,
+    backup_label: str | None = None,
+    log_callback: Optional[Callable[[str], None]] = None,
+) -> dict:
+    """
+    Backup selected config files from *account* into a dated backup directory.
+
+    Returns dict with keys "copied", "skipped", "failed", "backup_dir".
+    """
+    results: dict[str, list[str] | str] = {
+        "copied": [],
+        "skipped": [],
+        "failed": [],
+        "backup_dir": "",
+    }
+
+    def log(msg: str) -> None:
+        if log_callback:
+            log_callback(msg)
+
+    sid3 = account.get("steamid3", "unknown")
+    dated_label = backup_label or datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = Path(backup_root) / sid3 / dated_label
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    for group_name in file_groups:
+        entries = group_definitions.get(group_name, [])
+        for path_key, filename in entries:
+            src_file = Path(account[path_key]) / filename
+            dst_dir = backup_dir / path_key
+            dst_file = dst_dir / filename
+
+            if not src_file.is_file():
+                msg = f"[跳过] {group_name} – 待备份文件不存在: {src_file}"
+                log(msg)
+                results["skipped"].append(msg)
+                continue
+
+            try:
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                msg = f"[备份] {group_name}: {src_file} → {dst_file}"
+                log(msg)
+                results["copied"].append(msg)
+            except PermissionError as exc:
+                msg = f"[失败] {group_name} – 备份权限不足: {exc}"
+                log(msg)
+                results["failed"].append(msg)
+            except OSError as exc:
+                msg = f"[失败] {group_name} – 备份文件操作错误: {exc}"
+                log(msg)
+                results["failed"].append(msg)
+
+    results["backup_dir"] = str(backup_dir)
+    return results
+
+
 def sync_configs(
     source_account: dict,
     dest_account: dict,
