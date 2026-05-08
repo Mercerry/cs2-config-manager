@@ -55,6 +55,7 @@ WARNING_COLOR = "#ff9800"
 ERROR_COLOR = "#f44336"
 FONT_FAMILY = "Segoe UI"
 AVATAR_SIZE = 28
+SYNC_GROUP_COLUMNS = 2
 
 
 class CS2ConfigManager(tk.Tk):
@@ -251,8 +252,8 @@ class CS2ConfigManager(tk.Tk):
                 font=(FONT_FAMILY, 9),
             )
             cb.grid(
-                row=index // 2,
-                column=index % 2,
+                row=index // SYNC_GROUP_COLUMNS,
+                column=index % SYNC_GROUP_COLUMNS,
                 sticky="w",
                 padx=(0, 12),
                 pady=1,

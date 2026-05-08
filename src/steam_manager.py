@@ -169,6 +169,7 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
         return None
 
     for tag in ("avatarFull", "avatarMedium", "avatarIcon"):
+        # Match both CDATA and plain-text URL values to support profile XML variations.
         match = re.search(
             rf"<{tag}>\s*(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))\s*</{tag}>",
             content,
