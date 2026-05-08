@@ -7,6 +7,7 @@ A Windows utility for syncing CS2 configuration files between Steam accounts.
 import sys
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 # Ensure src/ is importable when run as a script or bundled executable.
@@ -15,10 +16,15 @@ if getattr(sys, "frozen", False):
     sys.path.insert(0, os.path.dirname(sys.executable))
 
 from steam_manager import CONFIG_FILE_GROUPS, find_steam_path, get_cs2_accounts
-from config_syncer import sync_configs
+from config_syncer import (
+    apply_saved_profile_configs,
+    list_saved_profiles,
+    save_profile_configs,
+    sync_configs,
+)
 
 APP_TITLE = "CS2 配置同步管理器"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 WINDOW_WIDTH = 860
 WINDOW_HEIGHT = 640
 BG_COLOR = "#1a1a2e"
@@ -51,8 +57,13 @@ class CS2ConfigManager(tk.Tk):
         self._accounts: list[dict] = []
         self._sync_vars: dict[str, tk.BooleanVar] = {}
         self._backup_var = tk.BooleanVar(value=True)
+        self._profile_name_var = tk.StringVar()
+        self._profile_var = tk.StringVar()
+        self._profile_label_to_name: dict[str, str] = {}
+        self._profile_storage_root = Path.home() / ".cs2-config-manager" / "profiles"
 
         self._build_ui()
+        self._refresh_profiles()
         self._detect_steam()
 
     # ------------------------------------------------------------------
@@ -144,6 +155,7 @@ class CS2ConfigManager(tk.Tk):
         self._build_account_selectors(left)
         self._build_file_group_checkboxes(left)
         self._build_options(left)
+        self._build_profile_storage(left)
         self._build_sync_button(left)
 
         # ---- Right: file list preview ----
@@ -256,6 +268,82 @@ class CS2ConfigManager(tk.Tk):
             cursor="hand2",
         )
         self._sync_btn.pack(fill=tk.X, pady=(4, 0))
+
+    def _build_profile_storage(self, parent: tk.Frame) -> None:
+        self._section_label(parent, "配置存储")
+
+        card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=8)
+        card.pack(fill=tk.X, pady=(4, 8))
+
+        tk.Label(
+            card,
+            text="配置档名称（留空将自动生成）:",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(anchor=tk.W)
+
+        tk.Entry(
+            card,
+            textvariable=self._profile_name_var,
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            insertbackground=TEXT_COLOR,
+            relief=tk.FLAT,
+            font=(FONT_FAMILY, 9),
+        ).pack(fill=tk.X, pady=(2, 6))
+
+        tk.Button(
+            card,
+            text="保存源账号配置到本地",
+            command=self._save_profile,
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            relief=tk.FLAT,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+        ).pack(fill=tk.X, pady=(0, 6))
+
+        tk.Label(
+            card,
+            text="已保存配置档:",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(anchor=tk.W)
+
+        self._profile_combo = ttk.Combobox(
+            card,
+            textvariable=self._profile_var,
+            state="readonly",
+            font=(FONT_FAMILY, 9),
+        )
+        self._profile_combo.pack(fill=tk.X, pady=(2, 6))
+
+        btn_row = tk.Frame(card, bg=SURFACE_COLOR)
+        btn_row.pack(fill=tk.X)
+
+        tk.Button(
+            btn_row,
+            text="刷新配置档",
+            command=self._refresh_profiles,
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            relief=tk.FLAT,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        tk.Button(
+            btn_row,
+            text="应用到目标账号",
+            command=self._start_apply_profile,
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            relief=tk.FLAT,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
     def _build_file_preview(self, parent: tk.Frame) -> None:
         self._section_label(parent, "文件预览")
@@ -418,6 +506,23 @@ class CS2ConfigManager(tk.Tk):
 
         self._update_file_preview()
 
+    def _refresh_profiles(self) -> None:
+        profiles = list_saved_profiles(self._profile_storage_root)
+        labels: list[str] = []
+        self._profile_label_to_name.clear()
+        for p in profiles:
+            saved_at = p.get("saved_at", "")
+            source_name = p.get("display_name", p.get("name", ""))
+            label = f"{source_name} ({saved_at})" if saved_at else source_name
+            labels.append(label)
+            self._profile_label_to_name[label] = p.get("name", "")
+
+        self._profile_combo["values"] = labels
+        if labels:
+            self._profile_combo.current(0)
+        else:
+            self._profile_var.set("")
+
     def _on_account_change(self, _event: tk.Event | None = None) -> None:
         self._update_file_preview()
 
@@ -481,6 +586,94 @@ class CS2ConfigManager(tk.Tk):
             args=(src, dst, selected_groups),
             daemon=True,
         ).start()
+
+    def _save_profile(self) -> None:
+        src = self._get_selected_account(self._src_var)
+        if not src:
+            messagebox.showwarning(APP_TITLE, "请先选择源账号。")
+            return
+
+        selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
+        if not selected_groups:
+            messagebox.showwarning(APP_TITLE, "请至少选择一种要保存的文件类型。")
+            return
+
+        profile_name = self._profile_name_var.get().strip() or f"{src['name']}_{src['steamid3']}"
+        self._log("═" * 50)
+        self._log(f"开始保存配置档: {profile_name}", "info")
+
+        results = save_profile_configs(
+            source_account=src,
+            file_groups=selected_groups,
+            group_definitions=CONFIG_FILE_GROUPS,
+            storage_root=self._profile_storage_root,
+            profile_name=profile_name,
+            log_callback=self._log_sync_line,
+        )
+
+        n_ok = len(results["copied"])
+        n_skip = len(results["skipped"])
+        n_fail = len(results["failed"])
+        summary = f"配置档保存完成：成功 {n_ok} 项，跳过 {n_skip} 项，失败 {n_fail} 项"
+        self._log(summary, "success" if n_fail == 0 else "warning")
+        self._log("═" * 50)
+        self._set_status(summary)
+        self._refresh_profiles()
+
+        if n_fail:
+            messagebox.showwarning(APP_TITLE, f"{summary}\n请检查操作日志获取详情。")
+        else:
+            messagebox.showinfo(APP_TITLE, summary)
+
+    def _start_apply_profile(self) -> None:
+        dst = self._get_selected_account(self._dst_var)
+        if not dst:
+            messagebox.showwarning(APP_TITLE, "请先选择目标账号。")
+            return
+
+        label = self._profile_var.get()
+        profile_name = self._profile_label_to_name.get(label)
+        if not profile_name:
+            messagebox.showwarning(APP_TITLE, "请先选择一个已保存配置档。")
+            return
+
+        selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
+        if not selected_groups:
+            messagebox.showwarning(APP_TITLE, "请至少选择一种要应用的文件类型。")
+            return
+
+        confirm = messagebox.askyesno(
+            APP_TITLE,
+            f"将把配置档\n  {label}\n应用到目标账号\n  {dst['name']}\n\n"
+            f"同步项目: {', '.join(selected_groups)}\n\n确认继续？",
+        )
+        if not confirm:
+            return
+
+        self._sync_btn.config(state=tk.DISABLED, text="应用中…")
+        self._set_status("正在应用配置档…")
+        self._log("═" * 50)
+        self._log(f"开始应用配置档: {label} → {dst['name']}", "info")
+
+        threading.Thread(
+            target=self._apply_profile_worker,
+            args=(profile_name, dst, selected_groups),
+            daemon=True,
+        ).start()
+
+    def _apply_profile_worker(
+        self, profile_name: str, dst: dict, selected_groups: list[str]
+    ) -> None:
+        results = apply_saved_profile_configs(
+            profile_name=profile_name,
+            dest_account=dst,
+            file_groups=selected_groups,
+            group_definitions=CONFIG_FILE_GROUPS,
+            storage_root=self._profile_storage_root,
+            backup=self._backup_var.get(),
+            log_callback=lambda msg: self.after(0, self._log_sync_line, msg),
+        )
+        self.after(0, self._on_sync_done, results)
 
     def _sync_worker(
         self, src: dict, dst: dict, selected_groups: list[str]

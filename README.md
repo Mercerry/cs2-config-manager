@@ -13,6 +13,7 @@
 | 👤 账号列表 | 自动列出所有拥有 CS2 数据的 Steam 账号（含昵称） |
 | 📋 文件预览 | 实时预览源账号与目标账号中各配置文件的存在状态 |
 | 📂 选择性同步 | 可勾选只同步特定类型的配置文件 |
+| 💾 配置存储 | 可将某个账号配置保存为本地配置档，后续直接应用到其他账号 |
 | 🔒 自动备份 | 同步前自动将目标文件备份为 `.bak_YYYYMMDD_HHMMSS` |
 | 📝 操作日志 | 实时显示每一步的操作结果 |
 
@@ -22,9 +23,10 @@
 |------|------|
 | `autoexec.cfg` | 自定义启动配置 |
 | `config.cfg` | 游戏主配置（按键绑定、设置） |
-| `video.txt` | 视频/画面设置 |
-| `cs2_user_keys.vdf` | 按键绑定数据 |
-| `cs2_user_convars.vdf` | 控制台变量 |
+| `cs2_video.txt` | 视频/画面设置 |
+| `cs2_user_keys_0_slot0.vcfg` | 按键绑定数据 |
+| `cs2_user_convars_0_slot0.vcfg` | 用户控制台变量 |
+| `cs2_machine_convars.vcfg` | 机器级控制台变量 |
 | `practiceserver.cfg` | 练习服务器配置 |
 
 ---
