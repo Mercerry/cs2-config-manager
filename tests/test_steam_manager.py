@@ -189,6 +189,36 @@ class TestGetSteamAvatarUrl(unittest.TestCase):
             url = get_steam_avatar_url("76561198000000000")
         self.assertIsNone(url)
 
+    def test_falls_back_to_medium_avatar_when_full_missing(self):
+        xml = (
+            "<profile>\n"
+            "  <avatarMedium><![CDATA[https://avatars.steamstatic.com/abc_medium.jpg]]></avatarMedium>\n"
+            "</profile>"
+        )
+        fake_response = MagicMock()
+        fake_response.read.return_value = xml.encode("utf-8")
+        fake_response.__enter__.return_value = fake_response
+
+        with patch("steam_manager.urlopen", return_value=fake_response):
+            url = get_steam_avatar_url("76561198000000000")
+
+        self.assertEqual(url, "https://avatars.steamstatic.com/abc_medium.jpg")
+
+    def test_parses_avatar_url_without_cdata(self):
+        xml = (
+            "<profile>"
+            "<avatarFull>https://avatars.steamstatic.com/plain_full.jpg</avatarFull>"
+            "</profile>"
+        )
+        fake_response = MagicMock()
+        fake_response.read.return_value = xml.encode("utf-8")
+        fake_response.__enter__.return_value = fake_response
+
+        with patch("steam_manager.urlopen", return_value=fake_response):
+            url = get_steam_avatar_url("76561198000000000")
+
+        self.assertEqual(url, "https://avatars.steamstatic.com/plain_full.jpg")
+
 
 class TestConfigFileGroups(unittest.TestCase):
     def test_all_groups_have_entries(self):

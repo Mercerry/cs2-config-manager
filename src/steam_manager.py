@@ -164,18 +164,22 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
     try:
         with urlopen(request, timeout=5) as response:
             raw_content = response.read()
-            content = raw_content.decode("utf-8")
-    except (URLError, TimeoutError, OSError, UnicodeDecodeError):
+            content = raw_content.decode("utf-8", errors="replace")
+    except (URLError, TimeoutError, OSError):
         return None
 
-    match = re.search(r"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", content)
-    if not match:
-        return None
-
-    avatar_url = match.group(1).strip()
-    if not avatar_url.startswith(("http://", "https://")):
-        return None
-    return avatar_url
+    for tag in ("avatarFull", "avatarMedium", "avatarIcon"):
+        match = re.search(
+            rf"<{tag}>\s*(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))\s*</{tag}>",
+            content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not match:
+            continue
+        avatar_url = (match.group(1) or match.group(2) or "").strip()
+        if avatar_url.startswith(("http://", "https://")):
+            return avatar_url
+    return None
 
 
 def get_cs2_accounts(steam_path: str) -> list[dict]:

@@ -225,6 +225,8 @@ class CS2ConfigManager(tk.Tk):
 
         card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=10)
         card.pack(fill=tk.X, pady=(4, 8))
+        card.columnconfigure(0, weight=1)
+        card.columnconfigure(1, weight=1)
 
         style = ttk.Style()
         style.configure(
@@ -234,7 +236,7 @@ class CS2ConfigManager(tk.Tk):
             font=(FONT_FAMILY, 9),
         )
 
-        for group_name in CONFIG_FILE_GROUPS:
+        for index, group_name in enumerate(CONFIG_FILE_GROUPS):
             var = tk.BooleanVar(value=True)
             self._sync_vars[group_name] = var
             cb = tk.Checkbutton(
@@ -248,7 +250,13 @@ class CS2ConfigManager(tk.Tk):
                 activeforeground=TEXT_COLOR,
                 font=(FONT_FAMILY, 9),
             )
-            cb.pack(anchor=tk.W, pady=1)
+            cb.grid(
+                row=index // 2,
+                column=index % 2,
+                sticky="w",
+                padx=(0, 12),
+                pady=1,
+            )
 
     def _build_options(self, parent: tk.Frame) -> None:
         self._section_label(parent, "选项")
