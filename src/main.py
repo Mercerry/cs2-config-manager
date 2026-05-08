@@ -1,0 +1,548 @@
+"""
+CS2 Config Manager – Main GUI Application.
+
+A Windows utility for syncing CS2 configuration files between Steam accounts.
+"""
+
+import sys
+import threading
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+# Ensure src/ is importable when run as a script or bundled executable.
+if getattr(sys, "frozen", False):
+    import os
+    sys.path.insert(0, os.path.dirname(sys.executable))
+
+from steam_manager import CONFIG_FILE_GROUPS, find_steam_path, get_cs2_accounts
+from config_syncer import sync_configs
+
+APP_TITLE = "CS2 配置同步管理器"
+APP_VERSION = "1.0.0"
+WINDOW_WIDTH = 860
+WINDOW_HEIGHT = 640
+BG_COLOR = "#1a1a2e"
+SURFACE_COLOR = "#16213e"
+CARD_COLOR = "#0f3460"
+ACCENT_COLOR = "#e94560"
+TEXT_COLOR = "#eaeaea"
+SUBTEXT_COLOR = "#a0a0b0"
+SUCCESS_COLOR = "#4caf50"
+WARNING_COLOR = "#ff9800"
+ERROR_COLOR = "#f44336"
+FONT_FAMILY = "Segoe UI"
+
+
+class CS2ConfigManager(tk.Tk):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title(f"{APP_TITLE}  v{APP_VERSION}")
+        self.configure(bg=BG_COLOR)
+        self.resizable(True, True)
+        self.minsize(700, 540)
+
+        # Center the window
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() - WINDOW_WIDTH) // 2
+        y = (self.winfo_screenheight() - WINDOW_HEIGHT) // 2
+        self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+
+        self._steam_path: str | None = None
+        self._accounts: list[dict] = []
+        self._sync_vars: dict[str, tk.BooleanVar] = {}
+        self._backup_var = tk.BooleanVar(value=True)
+
+        self._build_ui()
+        self._detect_steam()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        """Build all UI widgets."""
+        self._build_header()
+        self._build_steam_path_bar()
+        self._build_main_area()
+        self._build_log_area()
+        self._build_footer()
+
+    def _build_header(self) -> None:
+        header = tk.Frame(self, bg=CARD_COLOR, pady=12)
+        header.pack(fill=tk.X)
+
+        tk.Label(
+            header,
+            text="⚙  CS2 配置同步管理器",
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            font=(FONT_FAMILY, 18, "bold"),
+        ).pack(side=tk.LEFT, padx=20)
+
+        tk.Label(
+            header,
+            text=f"v{APP_VERSION}",
+            bg=CARD_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 10),
+        ).pack(side=tk.LEFT, padx=4, pady=8)
+
+    def _build_steam_path_bar(self) -> None:
+        bar = tk.Frame(self, bg=SURFACE_COLOR, pady=8, padx=16)
+        bar.pack(fill=tk.X)
+
+        tk.Label(
+            bar,
+            text="Steam 路径:",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(side=tk.LEFT)
+
+        self._steam_path_label = tk.Label(
+            bar,
+            text="检测中…",
+            bg=SURFACE_COLOR,
+            fg=TEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        )
+        self._steam_path_label.pack(side=tk.LEFT, padx=8)
+
+        tk.Button(
+            bar,
+            text="浏览…",
+            command=self._browse_steam,
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            relief=tk.FLAT,
+            padx=10,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+        ).pack(side=tk.RIGHT)
+
+        tk.Button(
+            bar,
+            text="刷新账号",
+            command=self._refresh_accounts,
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            relief=tk.FLAT,
+            padx=10,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+        ).pack(side=tk.RIGHT, padx=6)
+
+    def _build_main_area(self) -> None:
+        main = tk.Frame(self, bg=BG_COLOR)
+        main.pack(fill=tk.BOTH, expand=True, padx=16, pady=10)
+
+        # ---- Left: account selection + options ----
+        left = tk.Frame(main, bg=BG_COLOR, width=360)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
+        left.pack_propagate(False)
+
+        self._build_account_selectors(left)
+        self._build_file_group_checkboxes(left)
+        self._build_options(left)
+        self._build_sync_button(left)
+
+        # ---- Right: file list preview ----
+        right = tk.Frame(main, bg=BG_COLOR)
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(16, 0))
+        self._build_file_preview(right)
+
+    def _build_account_selectors(self, parent: tk.Frame) -> None:
+        self._section_label(parent, "账号选择")
+
+        card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=10)
+        card.pack(fill=tk.X, pady=(4, 8))
+
+        # Source account
+        tk.Label(
+            card,
+            text="源账号（复制配置来自）:",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(anchor=tk.W)
+
+        self._src_var = tk.StringVar()
+        self._src_combo = ttk.Combobox(
+            card,
+            textvariable=self._src_var,
+            state="readonly",
+            font=(FONT_FAMILY, 10),
+        )
+        self._src_combo.pack(fill=tk.X, pady=(2, 8))
+        self._src_combo.bind("<<ComboboxSelected>>", self._on_account_change)
+
+        # Destination account
+        tk.Label(
+            card,
+            text="目标账号（配置写入到）:",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(anchor=tk.W)
+
+        self._dst_var = tk.StringVar()
+        self._dst_combo = ttk.Combobox(
+            card,
+            textvariable=self._dst_var,
+            state="readonly",
+            font=(FONT_FAMILY, 10),
+        )
+        self._dst_combo.pack(fill=tk.X, pady=(2, 0))
+        self._dst_combo.bind("<<ComboboxSelected>>", self._on_account_change)
+
+    def _build_file_group_checkboxes(self, parent: tk.Frame) -> None:
+        self._section_label(parent, "同步文件类型")
+
+        card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=10)
+        card.pack(fill=tk.X, pady=(4, 8))
+
+        style = ttk.Style()
+        style.configure(
+            "Custom.TCheckbutton",
+            background=SURFACE_COLOR.__str__(),
+            foreground=TEXT_COLOR.__str__(),
+            font=(FONT_FAMILY, 9),
+        )
+
+        for group_name in CONFIG_FILE_GROUPS:
+            var = tk.BooleanVar(value=True)
+            self._sync_vars[group_name] = var
+            cb = tk.Checkbutton(
+                card,
+                text=group_name,
+                variable=var,
+                bg=SURFACE_COLOR,
+                fg=TEXT_COLOR,
+                selectcolor=CARD_COLOR,
+                activebackground=SURFACE_COLOR,
+                activeforeground=TEXT_COLOR,
+                font=(FONT_FAMILY, 9),
+            )
+            cb.pack(anchor=tk.W, pady=1)
+
+    def _build_options(self, parent: tk.Frame) -> None:
+        self._section_label(parent, "选项")
+
+        card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=8)
+        card.pack(fill=tk.X, pady=(4, 8))
+
+        tk.Checkbutton(
+            card,
+            text="同步前备份目标文件",
+            variable=self._backup_var,
+            bg=SURFACE_COLOR,
+            fg=TEXT_COLOR,
+            selectcolor=CARD_COLOR,
+            activebackground=SURFACE_COLOR,
+            activeforeground=TEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(anchor=tk.W)
+
+    def _build_sync_button(self, parent: tk.Frame) -> None:
+        self._sync_btn = tk.Button(
+            parent,
+            text="▶  开始同步",
+            command=self._start_sync,
+            bg=ACCENT_COLOR,
+            fg="white",
+            relief=tk.FLAT,
+            font=(FONT_FAMILY, 12, "bold"),
+            pady=10,
+            cursor="hand2",
+        )
+        self._sync_btn.pack(fill=tk.X, pady=(4, 0))
+
+    def _build_file_preview(self, parent: tk.Frame) -> None:
+        self._section_label(parent, "文件预览")
+
+        frame = tk.Frame(parent, bg=SURFACE_COLOR)
+        frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+
+        cols = ("文件", "源文件状态", "目标文件状态")
+        self._tree = ttk.Treeview(frame, columns=cols, show="headings", height=14)
+        for col in cols:
+            self._tree.heading(col, text=col)
+        self._tree.column("文件", width=200, stretch=True)
+        self._tree.column("源文件状态", width=100, anchor=tk.CENTER)
+        self._tree.column("目标文件状态", width=100, anchor=tk.CENTER)
+
+        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self._tree.yview)
+        self._tree.configure(yscrollcommand=vsb.set)
+        self._tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        style = ttk.Style()
+        style.configure(
+            "Treeview",
+            background=SURFACE_COLOR,
+            foreground=TEXT_COLOR,
+            fieldbackground=SURFACE_COLOR,
+            rowheight=22,
+            font=(FONT_FAMILY, 9),
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=CARD_COLOR,
+            foreground=TEXT_COLOR,
+            font=(FONT_FAMILY, 9, "bold"),
+        )
+        style.map("Treeview", background=[("selected", ACCENT_COLOR)])
+
+    def _build_log_area(self) -> None:
+        frame = tk.Frame(self, bg=BG_COLOR, padx=16, pady=0)
+        frame.pack(fill=tk.X)
+
+        self._section_label(frame, "操作日志")
+
+        log_frame = tk.Frame(frame, bg="#0a0a14")
+        log_frame.pack(fill=tk.X)
+
+        self._log_text = tk.Text(
+            log_frame,
+            height=7,
+            bg="#0a0a14",
+            fg=TEXT_COLOR,
+            font=("Consolas", 9),
+            relief=tk.FLAT,
+            state=tk.DISABLED,
+            wrap=tk.WORD,
+        )
+        vsb = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self._log_text.yview)
+        self._log_text.configure(yscrollcommand=vsb.set)
+        self._log_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._log_text.tag_config("success", foreground=SUCCESS_COLOR)
+        self._log_text.tag_config("warning", foreground=WARNING_COLOR)
+        self._log_text.tag_config("error", foreground=ERROR_COLOR)
+        self._log_text.tag_config("info", foreground=SUBTEXT_COLOR)
+
+    def _build_footer(self) -> None:
+        footer = tk.Frame(self, bg=SURFACE_COLOR, pady=4)
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
+
+        self._status_var = tk.StringVar(value="就绪")
+        tk.Label(
+            footer,
+            textvariable=self._status_var,
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(side=tk.LEFT, padx=12)
+
+        tk.Label(
+            footer,
+            text="MIT License © 2026 Mercerry",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 8),
+        ).pack(side=tk.RIGHT, padx=12)
+
+    # ------------------------------------------------------------------
+    # Helper widgets
+    # ------------------------------------------------------------------
+
+    def _section_label(self, parent: tk.Widget, text: str) -> None:
+        tk.Label(
+            parent,
+            text=text.upper(),
+            bg=BG_COLOR if parent["bg"] == BG_COLOR else parent["bg"],
+            fg=ACCENT_COLOR,
+            font=(FONT_FAMILY, 8, "bold"),
+        ).pack(anchor=tk.W, pady=(6, 0))
+
+    # ------------------------------------------------------------------
+    # Business logic
+    # ------------------------------------------------------------------
+
+    def _detect_steam(self) -> None:
+        """Auto-detect Steam installation in a background thread."""
+        self._set_status("正在检测 Steam 安装路径…")
+        threading.Thread(target=self._detect_steam_worker, daemon=True).start()
+
+    def _detect_steam_worker(self) -> None:
+        path = find_steam_path()
+        self.after(0, self._on_steam_detected, path)
+
+    def _on_steam_detected(self, path: str | None) -> None:
+        if path:
+            self._steam_path = path
+            self._steam_path_label.config(text=path, fg=SUCCESS_COLOR)
+            self._log(f"Steam 安装路径: {path}", "success")
+            self._refresh_accounts()
+        else:
+            self._steam_path_label.config(text="未检测到 Steam，请手动选择路径", fg=ERROR_COLOR)
+            self._log("未能自动检测到 Steam 安装路径，请使用「浏览…」按钮手动指定。", "error")
+            self._set_status("未找到 Steam 安装路径")
+
+    def _browse_steam(self) -> None:
+        from tkinter import filedialog
+        path = filedialog.askdirectory(title="选择 Steam 安装目录")
+        if path:
+            self._steam_path = path
+            self._steam_path_label.config(text=path, fg=SUCCESS_COLOR)
+            self._refresh_accounts()
+
+    def _refresh_accounts(self) -> None:
+        if not self._steam_path:
+            return
+        self._set_status("正在读取账号列表…")
+        threading.Thread(target=self._refresh_accounts_worker, daemon=True).start()
+
+    def _refresh_accounts_worker(self) -> None:
+        accounts = get_cs2_accounts(self._steam_path)
+        self.after(0, self._on_accounts_loaded, accounts)
+
+    def _on_accounts_loaded(self, accounts: list[dict]) -> None:
+        self._accounts = accounts
+        labels = [
+            f"{a['name']}  (SteamID3: {a['steamid3']})" for a in accounts
+        ]
+
+        self._src_combo["values"] = labels
+        self._dst_combo["values"] = labels
+
+        if labels:
+            self._src_combo.current(0)
+            self._dst_combo.current(min(1, len(labels) - 1))
+            self._log(f"找到 {len(accounts)} 个拥有 CS2 数据的账号。", "info")
+            self._set_status(f"已加载 {len(accounts)} 个账号")
+        else:
+            self._log("未找到任何拥有 CS2 数据的账号。请确认 Steam 路径正确。", "warning")
+            self._set_status("未找到 CS2 账号")
+
+        self._update_file_preview()
+
+    def _on_account_change(self, _event: tk.Event | None = None) -> None:
+        self._update_file_preview()
+
+    def _update_file_preview(self) -> None:
+        """Refresh the file preview treeview based on current account selection."""
+        for item in self._tree.get_children():
+            self._tree.delete(item)
+
+        src = self._get_selected_account(self._src_var)
+        dst = self._get_selected_account(self._dst_var)
+
+        for group_name, entries in CONFIG_FILE_GROUPS.items():
+            for path_key, filename in entries:
+                src_state = "—"
+                dst_state = "—"
+                if src:
+                    src_file = src[path_key] / filename
+                    src_state = "✔ 存在" if src_file.is_file() else "✘ 缺失"
+                if dst:
+                    dst_file = dst[path_key] / filename
+                    dst_state = "✔ 存在" if dst_file.is_file() else "✘ 缺失"
+
+                self._tree.insert("", tk.END, values=(filename, src_state, dst_state))
+
+    def _get_selected_account(self, var: tk.StringVar) -> dict | None:
+        label = var.get()
+        for acc in self._accounts:
+            expected = f"{acc['name']}  (SteamID3: {acc['steamid3']})"
+            if expected == label:
+                return acc
+        return None
+
+    def _start_sync(self) -> None:
+        src = self._get_selected_account(self._src_var)
+        dst = self._get_selected_account(self._dst_var)
+
+        if not src or not dst:
+            messagebox.showwarning(APP_TITLE, "请先选择源账号和目标账号。")
+            return
+
+        selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
+        if not selected_groups:
+            messagebox.showwarning(APP_TITLE, "请至少选择一种要同步的文件类型。")
+            return
+
+        confirm = messagebox.askyesno(
+            APP_TITLE,
+            f"将从\n  {src['name']}\n同步配置到\n  {dst['name']}\n\n"
+            f"同步项目: {', '.join(selected_groups)}\n\n确认继续？",
+        )
+        if not confirm:
+            return
+
+        self._sync_btn.config(state=tk.DISABLED, text="同步中…")
+        self._set_status("正在同步…")
+        self._log("═" * 50)
+        self._log(f"开始同步: {src['name']} → {dst['name']}", "info")
+
+        threading.Thread(
+            target=self._sync_worker,
+            args=(src, dst, selected_groups),
+            daemon=True,
+        ).start()
+
+    def _sync_worker(
+        self, src: dict, dst: dict, selected_groups: list[str]
+    ) -> None:
+        results = sync_configs(
+            source_account=src,
+            dest_account=dst,
+            file_groups=selected_groups,
+            group_definitions=CONFIG_FILE_GROUPS,
+            backup=self._backup_var.get(),
+            log_callback=lambda msg: self.after(0, self._log_sync_line, msg),
+        )
+        self.after(0, self._on_sync_done, results)
+
+    def _log_sync_line(self, msg: str) -> None:
+        if msg.startswith("[成功]"):
+            tag = "success"
+        elif msg.startswith("[失败]"):
+            tag = "error"
+        elif msg.startswith("[跳过]"):
+            tag = "warning"
+        elif msg.startswith("[备份]"):
+            tag = "info"
+        else:
+            tag = None
+        self._log(msg, tag)
+
+    def _on_sync_done(self, results: dict) -> None:
+        n_ok = len(results["copied"])
+        n_skip = len(results["skipped"])
+        n_fail = len(results["failed"])
+
+        summary = f"同步完成：成功 {n_ok} 项，跳过 {n_skip} 项，失败 {n_fail} 项"
+        self._log(summary, "success" if n_fail == 0 else "warning")
+        self._log("═" * 50)
+        self._set_status(summary)
+        self._sync_btn.config(state=tk.NORMAL, text="▶  开始同步")
+        self._update_file_preview()
+
+        if n_fail:
+            messagebox.showwarning(APP_TITLE, f"同步完成，但有 {n_fail} 项失败。\n请检查操作日志获取详情。")
+        else:
+            messagebox.showinfo(APP_TITLE, summary)
+
+    # ------------------------------------------------------------------
+    # Logging helpers
+    # ------------------------------------------------------------------
+
+    def _log(self, msg: str, tag: str | None = None) -> None:
+        self._log_text.config(state=tk.NORMAL)
+        self._log_text.insert(tk.END, msg + "\n", tag or "")
+        self._log_text.see(tk.END)
+        self._log_text.config(state=tk.DISABLED)
+
+    def _set_status(self, msg: str) -> None:
+        self._status_var.set(msg)
+
+
+def main() -> None:
+    app = CS2ConfigManager()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
