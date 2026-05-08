@@ -7,6 +7,7 @@ A Windows utility for syncing CS2 configuration files between Steam accounts.
 import sys
 import threading
 import tkinter as tk
+from hashlib import sha256
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -38,6 +39,10 @@ SUCCESS_COLOR = "#4caf50"
 WARNING_COLOR = "#ff9800"
 ERROR_COLOR = "#f44336"
 FONT_FAMILY = "Segoe UI"
+PREVIEW_COL_FILE = "文件"
+PREVIEW_COL_SRC = "源文件状态"
+PREVIEW_COL_DST = "目标文件状态"
+MAX_PREVIEW_ACCOUNT_NAME = 10
 
 
 class CS2ConfigManager(tk.Tk):
@@ -47,12 +52,7 @@ class CS2ConfigManager(tk.Tk):
         self.configure(bg=BG_COLOR)
         self.resizable(True, True)
         self.minsize(700, 540)
-
-        # Center the window
-        self.update_idletasks()
-        x = (self.winfo_screenwidth() - WINDOW_WIDTH) // 2
-        y = (self.winfo_screenheight() - WINDOW_HEIGHT) // 2
-        self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+        self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
 
         self._steam_path: str | None = None
         self._accounts: list[dict] = []
@@ -66,6 +66,7 @@ class CS2ConfigManager(tk.Tk):
         self._account_backup_root = Path.home() / ".cs2-config-manager" / "account-backups"
 
         self._build_ui()
+        self._fit_window_to_content()
         self._refresh_profiles()
         self._detect_steam()
 
@@ -190,6 +191,7 @@ class CS2ConfigManager(tk.Tk):
         )
         self._src_combo.pack(fill=tk.X, pady=(2, 8))
         self._src_combo.bind("<<ComboboxSelected>>", self._on_account_change)
+        self._src_avatar_canvas, self._src_avatar_label = self._build_avatar_badge(card, "源账号")
 
         # Destination account
         tk.Label(
@@ -209,6 +211,7 @@ class CS2ConfigManager(tk.Tk):
         )
         self._dst_combo.pack(fill=tk.X, pady=(2, 0))
         self._dst_combo.bind("<<ComboboxSelected>>", self._on_account_change)
+        self._dst_avatar_canvas, self._dst_avatar_label = self._build_avatar_badge(card, "目标账号")
 
     def _build_file_group_checkboxes(self, parent: tk.Frame) -> None:
         self._section_label(parent, "同步文件类型")
@@ -231,6 +234,7 @@ class CS2ConfigManager(tk.Tk):
                 card,
                 text=group_name,
                 variable=var,
+                command=self._update_file_preview,
                 bg=SURFACE_COLOR,
                 fg=TEXT_COLOR,
                 selectcolor=CARD_COLOR,
@@ -366,13 +370,13 @@ class CS2ConfigManager(tk.Tk):
         frame = tk.Frame(parent, bg=SURFACE_COLOR)
         frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
-        cols = ("文件", "源文件状态", "目标文件状态")
+        cols = (PREVIEW_COL_FILE, PREVIEW_COL_SRC, PREVIEW_COL_DST)
         self._tree = ttk.Treeview(frame, columns=cols, show="headings", height=14)
         for col in cols:
             self._tree.heading(col, text=col)
-        self._tree.column("文件", width=200, stretch=True)
-        self._tree.column("源文件状态", width=100, anchor=tk.CENTER)
-        self._tree.column("目标文件状态", width=100, anchor=tk.CENTER)
+        self._tree.column(PREVIEW_COL_FILE, width=200, stretch=True)
+        self._tree.column(PREVIEW_COL_SRC, width=100, anchor=tk.CENTER)
+        self._tree.column(PREVIEW_COL_DST, width=100, anchor=tk.CENTER)
 
         vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -445,6 +449,45 @@ class CS2ConfigManager(tk.Tk):
             fg=SUBTEXT_COLOR,
             font=(FONT_FAMILY, 8),
         ).pack(side=tk.RIGHT, padx=12)
+
+    def _fit_window_to_content(self) -> None:
+        """Resize and center the window so all content is visible by default."""
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        req_width = self.winfo_reqwidth()
+        req_height = self.winfo_reqheight()
+
+        width = min(max(WINDOW_WIDTH, req_width + 24), screen_width - 40)
+        height = min(max(WINDOW_HEIGHT, req_height + 40), screen_height - 80)
+        x = max((screen_width - width) // 2, 0)
+        y = max((screen_height - height) // 2, 0)
+
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _build_avatar_badge(
+        self, parent: tk.Frame, placeholder: str
+    ) -> tuple[tk.Canvas, tk.Label]:
+        row = tk.Frame(parent, bg=SURFACE_COLOR)
+        row.pack(fill=tk.X, pady=(0, 8))
+        canvas = tk.Canvas(
+            row,
+            width=28,
+            height=28,
+            bg=SURFACE_COLOR,
+            highlightthickness=0,
+            bd=0,
+        )
+        canvas.pack(side=tk.LEFT)
+        label = tk.Label(
+            row,
+            text=placeholder,
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        )
+        label.pack(side=tk.LEFT, padx=(8, 0))
+        return canvas, label
 
     # ------------------------------------------------------------------
     # Helper widgets
@@ -519,6 +562,7 @@ class CS2ConfigManager(tk.Tk):
             self._log("未找到任何拥有 CS2 数据的账号。请确认 Steam 路径正确。", "warning")
             self._set_status("未找到 CS2 账号")
 
+        self._update_account_avatars()
         self._update_file_preview()
 
     def _refresh_profiles(self) -> None:
@@ -539,6 +583,7 @@ class CS2ConfigManager(tk.Tk):
             self._profile_var.set("")
 
     def _on_account_change(self, _event: tk.Event | None = None) -> None:
+        self._update_account_avatars()
         self._update_file_preview()
 
     def _update_file_preview(self) -> None:
@@ -548,19 +593,43 @@ class CS2ConfigManager(tk.Tk):
 
         src = self._get_selected_account(self._src_var)
         dst = self._get_selected_account(self._dst_var)
+        self._tree.heading(PREVIEW_COL_SRC, text=f"{self._preview_account_name(src, '源账号')} 状态")
+        self._tree.heading(PREVIEW_COL_DST, text=f"{self._preview_account_name(dst, '目标账号')} 状态")
 
-        for group_name, entries in CONFIG_FILE_GROUPS.items():
+        selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
+        if not selected_groups:
+            self._tree.insert("", tk.END, values=("请先勾选至少一种同步文件类型", "—", "—"))
+            return
+
+        if not src and not dst:
+            self._tree.insert("", tk.END, values=("请先选择源账号和目标账号", "—", "—"))
+            return
+
+        for group_name in selected_groups:
+            entries = CONFIG_FILE_GROUPS.get(group_name, [])
             for path_key, filename in entries:
                 src_state = "—"
                 dst_state = "—"
                 if src:
-                    src_file = src[path_key] / filename
-                    src_state = "✔ 存在" if src_file.is_file() else "✘ 缺失"
+                    src_path = src.get(path_key)
+                    if isinstance(src_path, Path):
+                        src_file = src_path / filename
+                        src_state = "✔ 存在" if src_file.is_file() else "✘ 缺失"
+                    else:
+                        src_state = "⚠ 路径无效"
                 if dst:
-                    dst_file = dst[path_key] / filename
-                    dst_state = "✔ 存在" if dst_file.is_file() else "✘ 缺失"
+                    dst_path = dst.get(path_key)
+                    if isinstance(dst_path, Path):
+                        dst_file = dst_path / filename
+                        dst_state = "✔ 存在" if dst_file.is_file() else "✘ 缺失"
+                    else:
+                        dst_state = "⚠ 路径无效"
 
-                self._tree.insert("", tk.END, values=(filename, src_state, dst_state))
+                self._tree.insert(
+                    "",
+                    tk.END,
+                    values=(f"[{group_name}] {filename}", src_state, dst_state),
+                )
 
     def _get_selected_account(self, var: tk.StringVar) -> dict | None:
         label = var.get()
@@ -569,6 +638,47 @@ class CS2ConfigManager(tk.Tk):
             if expected == label:
                 return acc
         return None
+
+    def _preview_account_name(self, account: dict | None, fallback: str) -> str:
+        if not account:
+            return fallback
+        name = account.get("name", fallback)
+        return f"{name[:MAX_PREVIEW_ACCOUNT_NAME]}…" if len(name) > MAX_PREVIEW_ACCOUNT_NAME else name
+
+    def _update_account_avatars(self) -> None:
+        src = self._get_selected_account(self._src_var)
+        dst = self._get_selected_account(self._dst_var)
+        self._draw_avatar(self._src_avatar_canvas, self._src_avatar_label, src, "源账号")
+        self._draw_avatar(self._dst_avatar_canvas, self._dst_avatar_label, dst, "目标账号")
+
+    def _draw_avatar(
+        self,
+        canvas: tk.Canvas,
+        label: tk.Label,
+        account: dict | None,
+        fallback_name: str,
+    ) -> None:
+        canvas.delete("all")
+        if not account:
+            color = "#4b4f68"
+            short = "?"
+            text = fallback_name
+        else:
+            seed = f"{account.get('steamid3', '')}:{account.get('name', '')}"
+            color = f"#{sha256(seed.encode('utf-8')).hexdigest()[:6]}"
+            name = account.get("name", fallback_name)
+            short = (name[:1] or "?").upper()
+            text = f"{name} (SteamID3: {account.get('steamid3', '')})"
+
+        canvas.create_oval(2, 2, 26, 26, fill=color, outline="")
+        canvas.create_text(
+            14,
+            14,
+            text=short,
+            fill="white",
+            font=(FONT_FAMILY, 10, "bold"),
+        )
+        label.config(text=text)
 
     def _start_sync(self) -> None:
         src = self._get_selected_account(self._src_var)
