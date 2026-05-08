@@ -18,6 +18,7 @@ if getattr(sys, "frozen", False):
 from steam_manager import CONFIG_FILE_GROUPS, find_steam_path, get_cs2_accounts
 from config_syncer import (
     apply_saved_profile_configs,
+    backup_account_configs,
     list_saved_profiles,
     save_profile_configs,
     sync_configs,
@@ -57,10 +58,12 @@ class CS2ConfigManager(tk.Tk):
         self._accounts: list[dict] = []
         self._sync_vars: dict[str, tk.BooleanVar] = {}
         self._backup_var = tk.BooleanVar(value=True)
+        self._dated_backup_var = tk.BooleanVar(value=False)
         self._profile_name_var = tk.StringVar()
         self._profile_var = tk.StringVar()
         self._profile_label_to_name: dict[str, str] = {}
         self._profile_storage_root = Path.home() / ".cs2-config-manager" / "profiles"
+        self._account_backup_root = Path.home() / ".cs2-config-manager" / "account-backups"
 
         self._build_ui()
         self._refresh_profiles()
@@ -247,6 +250,18 @@ class CS2ConfigManager(tk.Tk):
             card,
             text="同步前备份目标文件",
             variable=self._backup_var,
+            bg=SURFACE_COLOR,
+            fg=TEXT_COLOR,
+            selectcolor=CARD_COLOR,
+            activebackground=SURFACE_COLOR,
+            activeforeground=TEXT_COLOR,
+            font=(FONT_FAMILY, 9),
+        ).pack(anchor=tk.W)
+
+        tk.Checkbutton(
+            card,
+            text="同步前按日期备份目标账号配置",
+            variable=self._dated_backup_var,
             bg=SURFACE_COLOR,
             fg=TEXT_COLOR,
             selectcolor=CARD_COLOR,
@@ -664,6 +679,19 @@ class CS2ConfigManager(tk.Tk):
     def _apply_profile_worker(
         self, profile_name: str, dst: dict, selected_groups: list[str]
     ) -> None:
+        log_callback = lambda msg: self.after(0, self._log_sync_line, msg)
+        if self._dated_backup_var.get():
+            backup_results = backup_account_configs(
+                account=dst,
+                file_groups=selected_groups,
+                group_definitions=CONFIG_FILE_GROUPS,
+                backup_root=self._account_backup_root,
+                log_callback=log_callback,
+            )
+            if backup_results["failed"]:
+                self.after(0, self._on_sync_done, backup_results)
+                return
+
         results = apply_saved_profile_configs(
             profile_name=profile_name,
             dest_account=dst,
@@ -671,20 +699,33 @@ class CS2ConfigManager(tk.Tk):
             group_definitions=CONFIG_FILE_GROUPS,
             storage_root=self._profile_storage_root,
             backup=self._backup_var.get(),
-            log_callback=lambda msg: self.after(0, self._log_sync_line, msg),
+            log_callback=log_callback,
         )
         self.after(0, self._on_sync_done, results)
 
     def _sync_worker(
         self, src: dict, dst: dict, selected_groups: list[str]
     ) -> None:
+        log_callback = lambda msg: self.after(0, self._log_sync_line, msg)
+        if self._dated_backup_var.get():
+            backup_results = backup_account_configs(
+                account=dst,
+                file_groups=selected_groups,
+                group_definitions=CONFIG_FILE_GROUPS,
+                backup_root=self._account_backup_root,
+                log_callback=log_callback,
+            )
+            if backup_results["failed"]:
+                self.after(0, self._on_sync_done, backup_results)
+                return
+
         results = sync_configs(
             source_account=src,
             dest_account=dst,
             file_groups=selected_groups,
             group_definitions=CONFIG_FILE_GROUPS,
             backup=self._backup_var.get(),
-            log_callback=lambda msg: self.after(0, self._log_sync_line, msg),
+            log_callback=log_callback,
         )
         self.after(0, self._on_sync_done, results)
 
