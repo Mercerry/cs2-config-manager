@@ -10,7 +10,13 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from config_syncer import sync_configs, _backup_path
+from config_syncer import (
+    _backup_path,
+    apply_saved_profile_configs,
+    list_saved_profiles,
+    save_profile_configs,
+    sync_configs,
+)
 from steam_manager import CONFIG_FILE_GROUPS
 
 
@@ -147,6 +153,70 @@ class TestSyncConfigs(unittest.TestCase):
 
         self.assertEqual(len(results["copied"]), 2)
         self.assertEqual(len(results["failed"]), 0)
+
+    def test_save_profile_configs(self):
+        src = _make_account(self._tmpdir, "110")
+        (Path(src["cs2_cfg_path"]) / "autoexec.cfg").write_text("echo saved\n", encoding="utf-8")
+
+        storage_root = Path(self._tmpdir) / "profiles"
+        results = save_profile_configs(
+            source_account=src,
+            file_groups=["Autoexec (autoexec.cfg)"],
+            group_definitions=CONFIG_FILE_GROUPS,
+            storage_root=storage_root,
+            profile_name="Test Profile",
+        )
+
+        saved_file = storage_root / "Test_Profile" / "cs2_cfg_path" / "autoexec.cfg"
+        self.assertTrue(saved_file.is_file())
+        self.assertEqual(saved_file.read_text(encoding="utf-8"), "echo saved\n")
+        self.assertEqual(len(results["copied"]), 1)
+        self.assertEqual(results["profile_name"], "Test_Profile")
+
+    def test_apply_saved_profile_configs(self):
+        src = _make_account(self._tmpdir, "120")
+        dst = _make_account(self._tmpdir, "130")
+        (Path(src["cs2_cfg_path"]) / "autoexec.cfg").write_text("echo apply\n", encoding="utf-8")
+
+        storage_root = Path(self._tmpdir) / "profiles"
+        save_profile_configs(
+            source_account=src,
+            file_groups=["Autoexec (autoexec.cfg)"],
+            group_definitions=CONFIG_FILE_GROUPS,
+            storage_root=storage_root,
+            profile_name="Apply Profile",
+        )
+
+        results = apply_saved_profile_configs(
+            profile_name="Apply Profile",
+            dest_account=dst,
+            file_groups=["Autoexec (autoexec.cfg)"],
+            group_definitions=CONFIG_FILE_GROUPS,
+            storage_root=storage_root,
+            backup=False,
+        )
+
+        dst_file = Path(dst["cs2_cfg_path"]) / "autoexec.cfg"
+        self.assertTrue(dst_file.is_file())
+        self.assertEqual(dst_file.read_text(encoding="utf-8"), "echo apply\n")
+        self.assertEqual(len(results["copied"]), 1)
+
+    def test_list_saved_profiles(self):
+        src = _make_account(self._tmpdir, "140")
+        (Path(src["cs2_cfg_path"]) / "autoexec.cfg").write_text("echo profile\n", encoding="utf-8")
+
+        storage_root = Path(self._tmpdir) / "profiles"
+        save_profile_configs(
+            source_account=src,
+            file_groups=["Autoexec (autoexec.cfg)"],
+            group_definitions=CONFIG_FILE_GROUPS,
+            storage_root=storage_root,
+            profile_name="My Profile",
+        )
+
+        profiles = list_saved_profiles(storage_root)
+        self.assertGreaterEqual(len(profiles), 1)
+        self.assertEqual(profiles[0]["name"], "My_Profile")
 
 
 if __name__ == "__main__":

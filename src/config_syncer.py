@@ -2,6 +2,8 @@
 Config file sync logic with automatic backup support.
 """
 
+import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -76,6 +78,192 @@ def sync_configs(
                 log(msg)
                 results["copied"].append(msg)
 
+            except PermissionError as exc:
+                msg = f"[失败] {group_name} – 权限不足: {exc}"
+                log(msg)
+                results["failed"].append(msg)
+            except OSError as exc:
+                msg = f"[失败] {group_name} – 文件操作错误: {exc}"
+                log(msg)
+                results["failed"].append(msg)
+
+    return results
+
+
+def _sanitize_profile_name(profile_name: str) -> str:
+    """Return a filesystem-safe profile name."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (profile_name or "").strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned or "profile"
+
+
+def list_saved_profiles(storage_root: Path | str) -> list[dict]:
+    """List saved config profiles from *storage_root*."""
+    root = Path(storage_root)
+    if not root.is_dir():
+        return []
+
+    profiles: list[dict] = []
+    for profile_dir in root.iterdir():
+        if not profile_dir.is_dir():
+            continue
+
+        meta = {
+            "name": profile_dir.name,
+            "display_name": profile_dir.name,
+            "saved_at": "",
+            "source_steamid3": "",
+        }
+        meta_file = profile_dir / "profile.json"
+        if meta_file.is_file():
+            try:
+                loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+                meta.update(
+                    {
+                        "name": loaded.get("name", profile_dir.name),
+                        "display_name": loaded.get("display_name", profile_dir.name),
+                        "saved_at": loaded.get("saved_at", ""),
+                        "source_steamid3": loaded.get("source_steamid3", ""),
+                    }
+                )
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        profiles.append(meta)
+
+    profiles.sort(key=lambda p: p.get("saved_at", ""), reverse=True)
+    return profiles
+
+
+def save_profile_configs(
+    source_account: dict,
+    file_groups: list[str],
+    group_definitions: dict,
+    storage_root: Path | str,
+    profile_name: str,
+    log_callback: Optional[Callable[[str], None]] = None,
+) -> dict:
+    """
+    Save selected config files from *source_account* into a local named profile.
+
+    Returns dict with keys "copied", "skipped", "failed", "profile_name".
+    """
+    results: dict[str, list[str] | str] = {
+        "copied": [],
+        "skipped": [],
+        "failed": [],
+        "profile_name": "",
+    }
+
+    def log(msg: str) -> None:
+        if log_callback:
+            log_callback(msg)
+
+    safe_name = _sanitize_profile_name(profile_name)
+    profile_dir = Path(storage_root) / safe_name
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    for group_name in file_groups:
+        entries = group_definitions.get(group_name, [])
+        for path_key, filename in entries:
+            src_file = Path(source_account[path_key]) / filename
+            dst_dir = profile_dir / path_key
+            dst_file = dst_dir / filename
+
+            if not src_file.is_file():
+                msg = f"[跳过] {group_name} – 源文件不存在: {src_file}"
+                log(msg)
+                results["skipped"].append(msg)
+                continue
+
+            try:
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                msg = f"[成功] {group_name}: {src_file} → {dst_file}"
+                log(msg)
+                results["copied"].append(msg)
+            except PermissionError as exc:
+                msg = f"[失败] {group_name} – 权限不足: {exc}"
+                log(msg)
+                results["failed"].append(msg)
+            except OSError as exc:
+                msg = f"[失败] {group_name} – 文件操作错误: {exc}"
+                log(msg)
+                results["failed"].append(msg)
+
+    try:
+        meta = {
+            "name": safe_name,
+            "display_name": profile_name.strip() or safe_name,
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "source_steamid3": source_account.get("steamid3", ""),
+            "source_name": source_account.get("name", ""),
+            "groups": file_groups,
+        }
+        (profile_dir / "profile.json").write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        msg = f"[失败] 保存配置档元数据失败: {exc}"
+        log(msg)
+        results["failed"].append(msg)
+
+    results["profile_name"] = safe_name
+    return results
+
+
+def apply_saved_profile_configs(
+    profile_name: str,
+    dest_account: dict,
+    file_groups: list[str],
+    group_definitions: dict,
+    storage_root: Path | str,
+    backup: bool = True,
+    log_callback: Optional[Callable[[str], None]] = None,
+) -> dict:
+    """
+    Apply selected config files from a saved profile to *dest_account*.
+    """
+    results: dict[str, list[str]] = {"copied": [], "skipped": [], "failed": []}
+
+    def log(msg: str) -> None:
+        if log_callback:
+            log_callback(msg)
+
+    safe_name = _sanitize_profile_name(profile_name)
+    profile_dir = Path(storage_root) / safe_name
+    if not profile_dir.is_dir():
+        msg = f"[失败] 配置档不存在: {profile_dir}"
+        log(msg)
+        results["failed"].append(msg)
+        return results
+
+    for group_name in file_groups:
+        entries = group_definitions.get(group_name, [])
+        for path_key, filename in entries:
+            src_file = profile_dir / path_key / filename
+            dst_dir = Path(dest_account[path_key])
+            dst_file = dst_dir / filename
+
+            if not src_file.is_file():
+                msg = f"[跳过] {group_name} – 配置档文件不存在: {src_file}"
+                log(msg)
+                results["skipped"].append(msg)
+                continue
+
+            try:
+                dst_dir.mkdir(parents=True, exist_ok=True)
+
+                if dst_file.exists() and backup:
+                    bak = _backup_path(dst_file)
+                    shutil.copy2(dst_file, bak)
+                    log(f"[备份] {dst_file.name} → {bak.name}")
+
+                shutil.copy2(src_file, dst_file)
+                msg = f"[成功] {group_name}: {src_file} → {dst_file}"
+                log(msg)
+                results["copied"].append(msg)
             except PermissionError as exc:
                 msg = f"[失败] {group_name} – 权限不足: {exc}"
                 log(msg)

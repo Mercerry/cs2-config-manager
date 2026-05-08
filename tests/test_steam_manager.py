@@ -174,6 +174,17 @@ class TestConfigFileGroups(unittest.TestCase):
                     f"Group '{name}' has invalid path_key '{path_key}'",
                 )
 
+    def test_contains_cs2_default_files(self):
+        all_files = set()
+        for entries in CONFIG_FILE_GROUPS.values():
+            for _path_key, filename in entries:
+                all_files.add(filename)
+
+        self.assertIn("cs2_user_keys_0_slot0.vcfg", all_files)
+        self.assertIn("cs2_user_convars_0_slot0.vcfg", all_files)
+        self.assertIn("cs2_video.txt", all_files)
+        self.assertIn("cs2_machine_convars.vcfg", all_files)
+
 
 if __name__ == "__main__":
     unittest.main()

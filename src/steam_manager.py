@@ -204,14 +204,17 @@ CONFIG_FILE_GROUPS = {
     "Game Config (config.cfg)": [
         ("cs2_cfg_path", "config.cfg"),
     ],
-    "Video Settings (video.txt)": [
-        ("cs2_remote_path", "video.txt"),
+    "Video Settings (cs2_video.txt)": [
+        ("cs2_remote_path", "cs2_video.txt"),
     ],
-    "Key Bindings (cs2_user_keys.vdf)": [
-        ("cs2_remote_path", "cs2_user_keys.vdf"),
+    "Key Bindings (cs2_user_keys_0_slot0.vcfg)": [
+        ("cs2_cfg_path", "cs2_user_keys_0_slot0.vcfg"),
     ],
-    "Console Variables (cs2_user_convars.vdf)": [
-        ("cs2_remote_path", "cs2_user_convars.vdf"),
+    "Console Variables (cs2_user_convars_0_slot0.vcfg)": [
+        ("cs2_cfg_path", "cs2_user_convars_0_slot0.vcfg"),
+    ],
+    "Machine Console Variables (cs2_machine_convars.vcfg)": [
+        ("cs2_cfg_path", "cs2_machine_convars.vcfg"),
     ],
     "Practice Config (practiceserver.cfg)": [
         ("cs2_cfg_path", "practiceserver.cfg"),
