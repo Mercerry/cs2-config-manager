@@ -47,12 +47,7 @@ class CS2ConfigManager(tk.Tk):
         self.configure(bg=BG_COLOR)
         self.resizable(True, True)
         self.minsize(700, 540)
-
-        # Center the window
-        self.update_idletasks()
-        x = (self.winfo_screenwidth() - WINDOW_WIDTH) // 2
-        y = (self.winfo_screenheight() - WINDOW_HEIGHT) // 2
-        self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+        self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
 
         self._steam_path: str | None = None
         self._accounts: list[dict] = []
@@ -66,6 +61,7 @@ class CS2ConfigManager(tk.Tk):
         self._account_backup_root = Path.home() / ".cs2-config-manager" / "account-backups"
 
         self._build_ui()
+        self._fit_window_to_content()
         self._refresh_profiles()
         self._detect_steam()
 
@@ -445,6 +441,21 @@ class CS2ConfigManager(tk.Tk):
             fg=SUBTEXT_COLOR,
             font=(FONT_FAMILY, 8),
         ).pack(side=tk.RIGHT, padx=12)
+
+    def _fit_window_to_content(self) -> None:
+        """Resize and center the window so all content is visible by default."""
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        req_width = self.winfo_reqwidth()
+        req_height = self.winfo_reqheight()
+
+        width = min(max(WINDOW_WIDTH, req_width + 24), screen_width - 40)
+        height = min(max(WINDOW_HEIGHT, req_height + 40), screen_height - 80)
+        x = max((screen_width - width) // 2, 0)
+        y = max((screen_height - height) // 2, 0)
+
+        self.geometry(f"{width}x{height}+{x}+{y}")
 
     # ------------------------------------------------------------------
     # Helper widgets
