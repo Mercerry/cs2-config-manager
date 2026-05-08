@@ -164,6 +164,7 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
     try:
         with urlopen(request, timeout=5) as response:
             raw_content = response.read()
+            # Keep parsing tolerant for minor encoding issues in Steam profile XML.
             content = raw_content.decode("utf-8", errors="replace")
     except (URLError, TimeoutError, OSError):
         return None
