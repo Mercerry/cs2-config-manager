@@ -6,6 +6,7 @@ Supports Windows via Registry lookup and common path fallbacks.
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
@@ -164,13 +165,26 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
     try:
         with urlopen(request, timeout=5) as response:
             raw_content = response.read()
-            # Steam profile XML may contain malformed bytes; `replace` preserves
-            # XML structure so avatar tags remain parseable instead of failing.
+            # Steam profile data may include unexpected bytes; `replace` avoids
+            # decode exceptions so we can still attempt XML/regex extraction.
             content = raw_content.decode("utf-8", errors="replace")
     except (URLError, TimeoutError, OSError):
         return None
 
-    for tag in ("avatarFull", "avatarMedium", "avatarIcon"):
+    avatar_tags = ("avatarFull", "avatarMedium", "avatarIcon")
+    try:
+        root = ET.fromstring(content)
+        for tag in avatar_tags:
+            for elem in root.iter():
+                if elem.tag.lower() != tag.lower():
+                    continue
+                avatar_url = (elem.text or "").strip()
+                if avatar_url.startswith(("http://", "https://")):
+                    return avatar_url
+    except ET.ParseError:
+        pass
+
+    for tag in avatar_tags:
         # group(1): URL inside CDATA; group(2): plain-text URL.
         # This supports profile XML variants that use either representation.
         match = re.search(
