@@ -176,10 +176,10 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
         root = ET.fromstring(content)
         avatar_values: dict[str, str] = {}
         for tag in avatar_tags:
-            for elem in root.iter(tag):
-                # Keep first occurrence only; Steam profile fields are expected single-valued.
+            # Keep first occurrence only; Steam profile fields are expected single-valued.
+            elem = next(root.iter(tag), None)
+            if elem is not None:
                 avatar_values[tag.lower()] = (elem.text or "").strip()
-                break
         for tag in avatar_tags:
             avatar_url = avatar_values.get(tag.lower(), "")
             if avatar_url.startswith(("http://", "https://")):
