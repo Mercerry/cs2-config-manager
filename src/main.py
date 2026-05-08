@@ -23,6 +23,7 @@ from steam_manager import (
     find_steam_path,
     get_cs2_accounts,
     get_steam_avatar_url,
+    STEAM_HTTP_USER_AGENT,
 )
 from config_syncer import (
     apply_saved_profile_configs,
@@ -33,10 +34,11 @@ from config_syncer import (
 )
 
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageTk, UnidentifiedImageError
 except ImportError:
     Image = None
     ImageTk = None
+    UnidentifiedImageError = OSError
 
 APP_TITLE = "CS2 配置同步管理器"
 APP_VERSION = "1.1.0"
@@ -613,7 +615,7 @@ class CS2ConfigManager(tk.Tk):
         if not avatar_url:
             self.after(0, self._on_avatar_failed, steamid64)
             return
-        request = Request(avatar_url, headers={"User-Agent": "CS2ConfigManager/1.1"})
+        request = Request(avatar_url, headers={"User-Agent": STEAM_HTTP_USER_AGENT})
         try:
             with urlopen(request, timeout=5) as response:
                 image_data = response.read()
@@ -631,9 +633,16 @@ class CS2ConfigManager(tk.Tk):
             return
         try:
             with Image.open(BytesIO(image_data)) as img:
-                resized = img.convert("RGBA").resize((AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS)
+                processed = img.copy()
+                if processed.mode not in ("RGB", "RGBA"):
+                    processed = processed.convert("RGBA")
+                if hasattr(Image, "Resampling"):
+                    resample_filter = Image.Resampling.LANCZOS
+                else:
+                    resample_filter = Image.LANCZOS
+                resized = processed.resize((AVATAR_SIZE, AVATAR_SIZE), resample_filter)
                 photo = ImageTk.PhotoImage(resized)
-        except Exception:
+        except (UnidentifiedImageError, OSError, ValueError, TypeError):
             return
         self._avatar_cache[steamid64] = photo
         self._update_account_avatars()
