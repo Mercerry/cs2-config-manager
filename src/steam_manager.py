@@ -6,6 +6,7 @@ Supports Windows via Registry lookup and common path fallbacks.
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
@@ -164,18 +165,42 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
     try:
         with urlopen(request, timeout=5) as response:
             raw_content = response.read()
-            content = raw_content.decode("utf-8")
-    except (URLError, TimeoutError, OSError, UnicodeDecodeError):
+            # Steam profile data may include unexpected bytes; `replace` avoids
+            # decode exceptions so we can still attempt XML/regex extraction.
+            content = raw_content.decode("utf-8", errors="replace")
+    except (URLError, TimeoutError, OSError):
         return None
 
-    match = re.search(r"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", content)
-    if not match:
-        return None
+    avatar_tags = ("avatarFull", "avatarMedium", "avatarIcon")
+    try:
+        root = ET.fromstring(content)
+        avatar_urls_by_tag: dict[str, str] = {}
+        for tag in avatar_tags:
+            # Keep first occurrence only; Steam profile fields are expected single-valued.
+            elem = root.find(tag)
+            if elem is not None:
+                avatar_urls_by_tag[tag.lower()] = (elem.text or "").strip()
+        for tag in avatar_tags:
+            avatar_url = avatar_urls_by_tag.get(tag.lower(), "")
+            if avatar_url.startswith(("http://", "https://")):
+                return avatar_url
+    except ET.ParseError:
+        pass
 
-    avatar_url = match.group(1).strip()
-    if not avatar_url.startswith(("http://", "https://")):
-        return None
-    return avatar_url
+    for tag in avatar_tags:
+        # group(1): URL inside CDATA; group(2): plain-text URL.
+        # This supports profile XML variants that use either representation.
+        match = re.search(
+            rf"<{tag}>\s*(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))\s*</{tag}>",
+            content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not match:
+            continue
+        avatar_url = (match.group(1) or match.group(2) or "").strip()
+        if avatar_url.startswith(("http://", "https://")):
+            return avatar_url
+    return None
 
 
 def get_cs2_accounts(steam_path: str) -> list[dict]:
