@@ -177,11 +177,14 @@ class CS2ConfigManager(tk.Tk):
         right_col = tk.Frame(content, bg=BG_COLOR)
         right_col.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
+        button_row = tk.Frame(content, bg=BG_COLOR)
+        button_row.grid(row=1, column=0, columnspan=2, sticky="ew")
+
         self._build_account_selectors(left_col)
         self._build_file_group_checkboxes(left_col)
         self._build_options(right_col)
         self._build_profile_storage(right_col)
-        self._build_sync_button(main)
+        self._build_sync_button(button_row)
 
     def _build_account_selectors(self, parent: tk.Frame) -> None:
         self._section_label(parent, "账号选择")
