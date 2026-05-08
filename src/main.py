@@ -168,24 +168,23 @@ class CS2ConfigManager(tk.Tk):
 
         content = tk.Frame(main, bg=BG_COLOR)
         content.pack(fill=tk.BOTH, expand=True)
+        content.columnconfigure(0, weight=1)
+        content.columnconfigure(1, weight=1)
 
-        self._build_account_selectors(content)
-        self._build_file_group_checkboxes(content)
+        left_col = tk.Frame(content, bg=BG_COLOR)
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
-        options_and_storage = tk.Frame(content, bg=BG_COLOR)
-        options_and_storage.pack(fill=tk.X)
-        options_and_storage.columnconfigure(0, weight=1)
-        options_and_storage.columnconfigure(1, weight=1)
+        right_col = tk.Frame(content, bg=BG_COLOR)
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
-        options_col = tk.Frame(options_and_storage, bg=BG_COLOR)
-        options_col.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        button_row = tk.Frame(content, bg=BG_COLOR)
+        button_row.grid(row=1, column=0, columnspan=2, sticky="ew")
 
-        profile_storage_col = tk.Frame(options_and_storage, bg=BG_COLOR)
-        profile_storage_col.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-
-        self._build_options(options_col)
-        self._build_profile_storage(profile_storage_col)
-        self._build_sync_button(content)
+        self._build_account_selectors(left_col)
+        self._build_file_group_checkboxes(left_col)
+        self._build_options(right_col)
+        self._build_profile_storage(right_col)
+        self._build_sync_button(button_row)
 
     def _build_account_selectors(self, parent: tk.Frame) -> None:
         self._section_label(parent, "账号选择")
