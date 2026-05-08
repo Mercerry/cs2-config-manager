@@ -164,13 +164,15 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
     try:
         with urlopen(request, timeout=5) as response:
             raw_content = response.read()
-            # Keep parsing tolerant for minor encoding issues in Steam profile XML.
+            # Steam profile XML may contain malformed bytes; `replace` preserves
+            # XML structure so avatar tags remain parseable instead of failing.
             content = raw_content.decode("utf-8", errors="replace")
     except (URLError, TimeoutError, OSError):
         return None
 
     for tag in ("avatarFull", "avatarMedium", "avatarIcon"):
-        # Match both CDATA and plain-text URL values to support profile XML variations.
+        # group(1): URL inside CDATA; group(2): plain-text URL.
+        # This supports profile XML variants that use either representation.
         match = re.search(
             rf"<{tag}>\s*(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))\s*</{tag}>",
             content,
