@@ -17,6 +17,7 @@ from steam_manager import (
     _common_steam_paths,
     find_steam_path,
     get_cs2_accounts,
+    get_steam_avatar_url,
     CONFIG_FILE_GROUPS,
 )
 
@@ -156,6 +157,37 @@ class TestGetCs2Accounts(unittest.TestCase):
             self.assertEqual(len(accounts), 1)
             self.assertEqual(accounts[0]["name"], "TestPlayer")
             self.assertEqual(accounts[0]["steamid64"], steamid64_correct)
+
+
+class TestGetSteamAvatarUrl(unittest.TestCase):
+    def test_parses_avatar_url_from_profile_xml(self):
+        xml = (
+            "<profile>"
+            "<avatarFull><![CDATA[https://avatars.steamstatic.com/abc_full.jpg]]></avatarFull>"
+            "</profile>"
+        )
+        fake_response = MagicMock()
+        fake_response.read.return_value = xml.encode("utf-8")
+        fake_response.__enter__.return_value = fake_response
+
+        with patch("steam_manager.urlopen", return_value=fake_response):
+            url = get_steam_avatar_url("76561198000000000")
+
+        self.assertEqual(url, "https://avatars.steamstatic.com/abc_full.jpg")
+
+    def test_returns_none_on_network_error(self):
+        with patch("steam_manager.urlopen", side_effect=OSError("network down")):
+            url = get_steam_avatar_url("76561198000000000")
+        self.assertIsNone(url)
+
+    def test_returns_none_when_missing_avatar_tag(self):
+        fake_response = MagicMock()
+        fake_response.read.return_value = b"<profile></profile>"
+        fake_response.__enter__.return_value = fake_response
+
+        with patch("steam_manager.urlopen", return_value=fake_response):
+            url = get_steam_avatar_url("76561198000000000")
+        self.assertIsNone(url)
 
 
 class TestConfigFileGroups(unittest.TestCase):

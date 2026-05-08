@@ -7,16 +7,24 @@ A Windows utility for syncing CS2 configuration files between Steam accounts.
 import sys
 import threading
 import tkinter as tk
-from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from tkinter import messagebox, ttk
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 # Ensure src/ is importable when run as a script or bundled executable.
 if getattr(sys, "frozen", False):
     import os
     sys.path.insert(0, os.path.dirname(sys.executable))
 
-from steam_manager import CONFIG_FILE_GROUPS, find_steam_path, get_cs2_accounts
+from steam_manager import (
+    CONFIG_FILE_GROUPS,
+    find_steam_path,
+    get_cs2_accounts,
+    get_steam_avatar_url,
+    STEAM_HTTP_USER_AGENT,
+)
 from config_syncer import (
     apply_saved_profile_configs,
     backup_account_configs,
@@ -25,9 +33,16 @@ from config_syncer import (
     sync_configs,
 )
 
+try:
+    from PIL import Image, ImageTk, UnidentifiedImageError
+except ImportError:
+    Image = None
+    ImageTk = None
+    UnidentifiedImageError = OSError
+
 APP_TITLE = "CS2 配置同步管理器"
 APP_VERSION = "1.1.0"
-WINDOW_WIDTH = 860
+WINDOW_WIDTH = 680
 WINDOW_HEIGHT = 640
 BG_COLOR = "#1a1a2e"
 SURFACE_COLOR = "#16213e"
@@ -39,10 +54,7 @@ SUCCESS_COLOR = "#4caf50"
 WARNING_COLOR = "#ff9800"
 ERROR_COLOR = "#f44336"
 FONT_FAMILY = "Segoe UI"
-PREVIEW_COL_FILE = "文件"
-PREVIEW_COL_SRC = "源文件状态"
-PREVIEW_COL_DST = "目标文件状态"
-MAX_PREVIEW_ACCOUNT_NAME = 10
+AVATAR_SIZE = 28
 
 
 class CS2ConfigManager(tk.Tk):
@@ -64,6 +76,8 @@ class CS2ConfigManager(tk.Tk):
         self._profile_label_to_name: dict[str, str] = {}
         self._profile_storage_root = Path.home() / ".cs2-config-manager" / "profiles"
         self._account_backup_root = Path.home() / ".cs2-config-manager" / "account-backups"
+        self._avatar_cache: dict[str, tk.PhotoImage] = {}
+        self._avatar_pending: set[str] = set()
 
         self._build_ui()
         self._fit_window_to_content()
@@ -151,21 +165,14 @@ class CS2ConfigManager(tk.Tk):
         main = tk.Frame(self, bg=BG_COLOR)
         main.pack(fill=tk.BOTH, expand=True, padx=16, pady=10)
 
-        # ---- Left: account selection + options ----
-        left = tk.Frame(main, bg=BG_COLOR, width=360)
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
-        left.pack_propagate(False)
+        content = tk.Frame(main, bg=BG_COLOR)
+        content.pack(fill=tk.BOTH, expand=True)
 
-        self._build_account_selectors(left)
-        self._build_file_group_checkboxes(left)
-        self._build_options(left)
-        self._build_profile_storage(left)
-        self._build_sync_button(left)
-
-        # ---- Right: file list preview ----
-        right = tk.Frame(main, bg=BG_COLOR)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(16, 0))
-        self._build_file_preview(right)
+        self._build_account_selectors(content)
+        self._build_file_group_checkboxes(content)
+        self._build_options(content)
+        self._build_profile_storage(content)
+        self._build_sync_button(content)
 
     def _build_account_selectors(self, parent: tk.Frame) -> None:
         self._section_label(parent, "账号选择")
@@ -234,7 +241,6 @@ class CS2ConfigManager(tk.Tk):
                 card,
                 text=group_name,
                 variable=var,
-                command=self._update_file_preview,
                 bg=SURFACE_COLOR,
                 fg=TEXT_COLOR,
                 selectcolor=CARD_COLOR,
@@ -364,42 +370,6 @@ class CS2ConfigManager(tk.Tk):
             font=(FONT_FAMILY, 9),
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
-    def _build_file_preview(self, parent: tk.Frame) -> None:
-        self._section_label(parent, "文件预览")
-
-        frame = tk.Frame(parent, bg=SURFACE_COLOR)
-        frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-
-        cols = (PREVIEW_COL_FILE, PREVIEW_COL_SRC, PREVIEW_COL_DST)
-        self._tree = ttk.Treeview(frame, columns=cols, show="headings", height=14)
-        for col in cols:
-            self._tree.heading(col, text=col)
-        self._tree.column(PREVIEW_COL_FILE, width=200, stretch=True)
-        self._tree.column(PREVIEW_COL_SRC, width=100, anchor=tk.CENTER)
-        self._tree.column(PREVIEW_COL_DST, width=100, anchor=tk.CENTER)
-
-        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self._tree.yview)
-        self._tree.configure(yscrollcommand=vsb.set)
-        self._tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-
-        style = ttk.Style()
-        style.configure(
-            "Treeview",
-            background=SURFACE_COLOR,
-            foreground=TEXT_COLOR,
-            fieldbackground=SURFACE_COLOR,
-            rowheight=22,
-            font=(FONT_FAMILY, 9),
-        )
-        style.configure(
-            "Treeview.Heading",
-            background=CARD_COLOR,
-            foreground=TEXT_COLOR,
-            font=(FONT_FAMILY, 9, "bold"),
-        )
-        style.map("Treeview", background=[("selected", ACCENT_COLOR)])
-
     def _build_log_area(self) -> None:
         frame = tk.Frame(self, bg=BG_COLOR, padx=16, pady=0)
         frame.pack(fill=tk.X)
@@ -472,8 +442,8 @@ class CS2ConfigManager(tk.Tk):
         row.pack(fill=tk.X, pady=(0, 8))
         canvas = tk.Canvas(
             row,
-            width=28,
-            height=28,
+            width=AVATAR_SIZE,
+            height=AVATAR_SIZE,
             bg=SURFACE_COLOR,
             highlightthickness=0,
             bd=0,
@@ -563,7 +533,6 @@ class CS2ConfigManager(tk.Tk):
             self._set_status("未找到 CS2 账号")
 
         self._update_account_avatars()
-        self._update_file_preview()
 
     def _refresh_profiles(self) -> None:
         profiles = list_saved_profiles(self._profile_storage_root)
@@ -584,52 +553,6 @@ class CS2ConfigManager(tk.Tk):
 
     def _on_account_change(self, _event: tk.Event | None = None) -> None:
         self._update_account_avatars()
-        self._update_file_preview()
-
-    def _update_file_preview(self) -> None:
-        """Refresh the file preview treeview based on current account selection."""
-        for item in self._tree.get_children():
-            self._tree.delete(item)
-
-        src = self._get_selected_account(self._src_var)
-        dst = self._get_selected_account(self._dst_var)
-        self._tree.heading(PREVIEW_COL_SRC, text=f"{self._preview_account_name(src, '源账号')} 状态")
-        self._tree.heading(PREVIEW_COL_DST, text=f"{self._preview_account_name(dst, '目标账号')} 状态")
-
-        selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
-        if not selected_groups:
-            self._tree.insert("", tk.END, values=("请先勾选至少一种同步文件类型", "—", "—"))
-            return
-
-        if not src and not dst:
-            self._tree.insert("", tk.END, values=("请先选择源账号和目标账号", "—", "—"))
-            return
-
-        for group_name in selected_groups:
-            entries = CONFIG_FILE_GROUPS.get(group_name, [])
-            for path_key, filename in entries:
-                src_state = "—"
-                dst_state = "—"
-                if src:
-                    src_path = src.get(path_key)
-                    if isinstance(src_path, Path):
-                        src_file = src_path / filename
-                        src_state = "✔ 存在" if src_file.is_file() else "✘ 缺失"
-                    else:
-                        src_state = "⚠ 路径无效"
-                if dst:
-                    dst_path = dst.get(path_key)
-                    if isinstance(dst_path, Path):
-                        dst_file = dst_path / filename
-                        dst_state = "✔ 存在" if dst_file.is_file() else "✘ 缺失"
-                    else:
-                        dst_state = "⚠ 路径无效"
-
-                self._tree.insert(
-                    "",
-                    tk.END,
-                    values=(f"[{group_name}] {filename}", src_state, dst_state),
-                )
 
     def _get_selected_account(self, var: tk.StringVar) -> dict | None:
         label = var.get()
@@ -638,12 +561,6 @@ class CS2ConfigManager(tk.Tk):
             if expected == label:
                 return acc
         return None
-
-    def _preview_account_name(self, account: dict | None, fallback: str) -> str:
-        if not account:
-            return fallback
-        name = account.get("name", fallback)
-        return f"{name[:MAX_PREVIEW_ACCOUNT_NAME]}…" if len(name) > MAX_PREVIEW_ACCOUNT_NAME else name
 
     def _update_account_avatars(self) -> None:
         src = self._get_selected_account(self._src_var)
@@ -664,21 +581,71 @@ class CS2ConfigManager(tk.Tk):
             short = "?"
             text = fallback_name
         else:
-            seed = f"{account.get('steamid3', '')}:{account.get('name', '')}"
-            color = f"#{sha256(seed.encode('utf-8')).hexdigest()[:6]}"
             name = account.get("name", fallback_name)
             short = (name[:1] or "?").upper()
             text = f"{name} (SteamID3: {account.get('steamid3', '')})"
+            steamid64 = account.get("steamid64", "")
+            if steamid64:
+                cached = self._avatar_cache.get(steamid64)
+                if cached:
+                    canvas.create_image(AVATAR_SIZE // 2, AVATAR_SIZE // 2, image=cached)
+                    label.config(text=text)
+                    return
+                self._ensure_avatar_fetch(steamid64)
+            color = "#4b4f68"
 
-        canvas.create_oval(2, 2, 26, 26, fill=color, outline="")
+        canvas.create_oval(2, 2, AVATAR_SIZE - 2, AVATAR_SIZE - 2, fill=color, outline="")
         canvas.create_text(
-            14,
-            14,
+            AVATAR_SIZE // 2,
+            AVATAR_SIZE // 2,
             text=short,
             fill="white",
             font=(FONT_FAMILY, 10, "bold"),
         )
         label.config(text=text)
+
+    def _ensure_avatar_fetch(self, steamid64: str) -> None:
+        if not steamid64 or steamid64 in self._avatar_cache or steamid64 in self._avatar_pending:
+            return
+        self._avatar_pending.add(steamid64)
+        threading.Thread(target=self._load_avatar_worker, args=(steamid64,), daemon=True).start()
+
+    def _load_avatar_worker(self, steamid64: str) -> None:
+        avatar_url = get_steam_avatar_url(steamid64)
+        if not avatar_url:
+            self.after(0, self._on_avatar_failed, steamid64)
+            return
+        request = Request(avatar_url, headers={"User-Agent": STEAM_HTTP_USER_AGENT})
+        try:
+            with urlopen(request, timeout=5) as response:
+                image_data = response.read()
+        except (URLError, TimeoutError, OSError):
+            self.after(0, self._on_avatar_failed, steamid64)
+            return
+        self.after(0, self._on_avatar_loaded, steamid64, image_data)
+
+    def _on_avatar_failed(self, steamid64: str) -> None:
+        self._avatar_pending.discard(steamid64)
+
+    def _on_avatar_loaded(self, steamid64: str, image_data: bytes) -> None:
+        self._avatar_pending.discard(steamid64)
+        if not image_data or Image is None or ImageTk is None:
+            return
+        try:
+            with Image.open(BytesIO(image_data)) as img:
+                processed = img.copy()
+                if processed.mode not in ("RGB", "RGBA"):
+                    processed = processed.convert("RGBA")
+                if hasattr(Image, "Resampling"):
+                    resample_filter = Image.Resampling.LANCZOS
+                else:
+                    resample_filter = Image.LANCZOS
+                resized = processed.resize((AVATAR_SIZE, AVATAR_SIZE), resample_filter)
+                photo = ImageTk.PhotoImage(resized)
+        except (UnidentifiedImageError, OSError, ValueError, TypeError):
+            return
+        self._avatar_cache[steamid64] = photo
+        self._update_account_avatars()
 
     def _start_sync(self) -> None:
         src = self._get_selected_account(self._src_var)
@@ -862,7 +829,6 @@ class CS2ConfigManager(tk.Tk):
         self._log("═" * 50)
         self._set_status(summary)
         self._sync_btn.config(state=tk.NORMAL, text="▶  开始同步")
-        self._update_file_preview()
 
         if n_fail:
             messagebox.showwarning(APP_TITLE, f"同步完成，但有 {n_fail} 项失败。\n请检查操作日志获取详情。")
