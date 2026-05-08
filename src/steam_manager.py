@@ -205,7 +205,7 @@ CONFIG_FILE_GROUPS = {
         ("cs2_cfg_path", "config.cfg"),
     ],
     "Video Settings (cs2_video.txt)": [
-        ("cs2_remote_path", "cs2_video.txt"),
+        ("cs2_cfg_path", "cs2_video.txt"),
     ],
     "Key Bindings (cs2_user_keys_0_slot0.vcfg)": [
         ("cs2_cfg_path", "cs2_user_keys_0_slot0.vcfg"),

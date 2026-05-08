@@ -185,6 +185,10 @@ class TestConfigFileGroups(unittest.TestCase):
         self.assertIn("cs2_video.txt", all_files)
         self.assertIn("cs2_machine_convars.vcfg", all_files)
 
+    def test_video_settings_uses_local_cfg_path(self):
+        entries = CONFIG_FILE_GROUPS["Video Settings (cs2_video.txt)"]
+        self.assertIn(("cs2_cfg_path", "cs2_video.txt"), entries)
+
 
 if __name__ == "__main__":
     unittest.main()
