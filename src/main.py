@@ -171,8 +171,20 @@ class CS2ConfigManager(tk.Tk):
 
         self._build_account_selectors(content)
         self._build_file_group_checkboxes(content)
-        self._build_options(content)
-        self._build_profile_storage(content)
+
+        options_and_storage = tk.Frame(content, bg=BG_COLOR)
+        options_and_storage.pack(fill=tk.X)
+        options_and_storage.columnconfigure(0, weight=1)
+        options_and_storage.columnconfigure(1, weight=1)
+
+        options_col = tk.Frame(options_and_storage, bg=BG_COLOR)
+        options_col.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        profile_storage_col = tk.Frame(options_and_storage, bg=BG_COLOR)
+        profile_storage_col.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        self._build_options(options_col)
+        self._build_profile_storage(profile_storage_col)
         self._build_sync_button(content)
 
     def _build_account_selectors(self, parent: tk.Frame) -> None:
