@@ -8,6 +8,8 @@ import re
 import sys
 from pathlib import Path
 from typing import Optional
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 CS2_APP_ID = "730"
 
@@ -144,6 +146,34 @@ def _steamid64_to_steamid3(steamid64: str) -> Optional[str]:
         return str(int(steamid64) - 76561197960265728)
     except (ValueError, TypeError):
         return None
+
+
+def get_steam_avatar_url(steamid64: str) -> Optional[str]:
+    """
+    Fetch avatar URL from Steam Community profile XML.
+
+    Returns avatarFull URL when available.
+    """
+    if not steamid64:
+        return None
+
+    profile_url = f"https://steamcommunity.com/profiles/{steamid64}/?xml=1"
+    request = Request(profile_url, headers={"User-Agent": "CS2ConfigManager/1.1"})
+
+    try:
+        with urlopen(request, timeout=5) as response:
+            content = response.read().decode("utf-8", errors="replace")
+    except (URLError, TimeoutError, OSError):
+        return None
+
+    match = re.search(r"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", content)
+    if not match:
+        return None
+
+    avatar_url = match.group(1).strip()
+    if not avatar_url.startswith(("http://", "https://")):
+        return None
+    return avatar_url
 
 
 def get_cs2_accounts(steam_path: str) -> list[dict]:
