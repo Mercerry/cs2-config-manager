@@ -7,7 +7,7 @@ A Windows utility for syncing CS2 configuration files between Steam accounts.
 import sys
 import threading
 import tkinter as tk
-from hashlib import md5
+from hashlib import sha256
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -39,6 +39,10 @@ SUCCESS_COLOR = "#4caf50"
 WARNING_COLOR = "#ff9800"
 ERROR_COLOR = "#f44336"
 FONT_FAMILY = "Segoe UI"
+PREVIEW_COL_FILE = "文件"
+PREVIEW_COL_SRC = "源文件状态"
+PREVIEW_COL_DST = "目标文件状态"
+MAX_PREVIEW_ACCOUNT_NAME = 10
 
 
 class CS2ConfigManager(tk.Tk):
@@ -366,13 +370,13 @@ class CS2ConfigManager(tk.Tk):
         frame = tk.Frame(parent, bg=SURFACE_COLOR)
         frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
-        cols = ("文件", "源文件状态", "目标文件状态")
+        cols = (PREVIEW_COL_FILE, PREVIEW_COL_SRC, PREVIEW_COL_DST)
         self._tree = ttk.Treeview(frame, columns=cols, show="headings", height=14)
         for col in cols:
             self._tree.heading(col, text=col)
-        self._tree.column("文件", width=200, stretch=True)
-        self._tree.column("源文件状态", width=100, anchor=tk.CENTER)
-        self._tree.column("目标文件状态", width=100, anchor=tk.CENTER)
+        self._tree.column(PREVIEW_COL_FILE, width=200, stretch=True)
+        self._tree.column(PREVIEW_COL_SRC, width=100, anchor=tk.CENTER)
+        self._tree.column(PREVIEW_COL_DST, width=100, anchor=tk.CENTER)
 
         vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -589,8 +593,8 @@ class CS2ConfigManager(tk.Tk):
 
         src = self._get_selected_account(self._src_var)
         dst = self._get_selected_account(self._dst_var)
-        self._tree.heading("源文件状态", text=f"{self._preview_account_name(src, '源账号')} 状态")
-        self._tree.heading("目标文件状态", text=f"{self._preview_account_name(dst, '目标账号')} 状态")
+        self._tree.heading(PREVIEW_COL_SRC, text=f"{self._preview_account_name(src, '源账号')} 状态")
+        self._tree.heading(PREVIEW_COL_DST, text=f"{self._preview_account_name(dst, '目标账号')} 状态")
 
         selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
         if not selected_groups:
@@ -639,7 +643,7 @@ class CS2ConfigManager(tk.Tk):
         if not account:
             return fallback
         name = account.get("name", fallback)
-        return f"{name[:10]}…" if len(name) > 10 else name
+        return f"{name[:MAX_PREVIEW_ACCOUNT_NAME]}…" if len(name) > MAX_PREVIEW_ACCOUNT_NAME else name
 
     def _update_account_avatars(self) -> None:
         src = self._get_selected_account(self._src_var)
@@ -661,7 +665,7 @@ class CS2ConfigManager(tk.Tk):
             text = fallback_name
         else:
             seed = f"{account.get('steamid3', '')}:{account.get('name', '')}"
-            color = f"#{md5(seed.encode('utf-8')).hexdigest()[:6]}"
+            color = f"#{sha256(seed.encode('utf-8')).hexdigest()[:6]}"
             name = account.get("name", fallback_name)
             short = (name[:1] or "?").upper()
             text = f"{name} (SteamID3: {account.get('steamid3', '')})"
