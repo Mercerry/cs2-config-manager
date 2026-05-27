@@ -340,6 +340,9 @@ class TestSwitchSteamAccount(unittest.TestCase):
                  patch("steam_manager._set_steam_autologin_user", return_value=False):
                 self.assertFalse(switch_steam_account(tmpdir, target_steamid64))
 
+            users = _parse_vdf_simple((config_dir / "loginusers.vdf").read_text(encoding="utf-8"))["users"]
+            self.assertEqual(users[target_steamid64]["MostRecent"], "0")
+
 
 class TestConfigFileGroups(unittest.TestCase):
     def test_all_groups_have_entries(self):

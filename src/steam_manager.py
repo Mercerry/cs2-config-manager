@@ -411,6 +411,15 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
         return False
 
     target_info = users[target_steamid64]
+    account_name = ""
+    for key in ("AccountName", "accountname"):
+        value = target_info.get(key)
+        if isinstance(value, str) and value.strip():
+            account_name = value.strip()
+            break
+    if account_name and not _set_steam_autologin_user(account_name):
+        return False
+
     for sid64, info in users.items():
         if sid64 == target_steamid64:
             # Steam VDF uses varying case for this key; set both to be safe
@@ -437,15 +446,6 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
     try:
         vdf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except OSError:
-        return False
-
-    account_name = ""
-    for key in ("AccountName", "accountname"):
-        value = target_info.get(key)
-        if isinstance(value, str) and value.strip():
-            account_name = value.strip()
-            break
-    if account_name and not _set_steam_autologin_user(account_name):
         return False
     return True
 
