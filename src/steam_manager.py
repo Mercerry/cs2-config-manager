@@ -6,6 +6,7 @@ Supports Windows via Registry lookup and common path fallbacks.
 import os
 import re
 import json
+import shutil
 import subprocess
 import sys
 from html import unescape
@@ -337,12 +338,14 @@ def get_cs2_accounts(steam_path: str) -> list[dict]:
 
         info = id3_to_info.get(sid3, {})
         persona = info.get("PersonaName", info.get("personaname", ""))
+        account_name = info.get("AccountName", info.get("accountname", ""))
 
         accounts.append(
             {
                 "steamid64": info.get("steamid64", ""),
                 "steamid3": sid3,
                 "name": persona or sid3,
+                "account_name": account_name,
                 "cs2_cfg_path": cs2_dir / "local" / "cfg",
                 "cs2_remote_path": cs2_dir / "remote",
             }
@@ -425,8 +428,10 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
             # Steam VDF uses varying case for this key; set both to be safe
             info["MostRecent"] = "1"
             info["mostrecent"] = "1"
-            if "RememberPassword" not in info and "rememberpassword" not in info:
-                info["RememberPassword"] = "1"
+            info["RememberPassword"] = "1"
+            info["rememberpassword"] = "1"
+            info["AllowAutoLogin"] = "1"
+            info["allowautologin"] = "1"
         else:
             info["MostRecent"] = "0"
             info["mostrecent"] = "0"
@@ -447,6 +452,69 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
         vdf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except OSError:
         return False
+    return True
+
+
+def delete_steam_account(
+    steam_path: str,
+    target_steamid3: str,
+    target_steamid64: str = "",
+) -> bool:
+    """
+    Delete Steam account local data from userdata and remove loginusers entry.
+
+    Returns True on success, False otherwise.
+    """
+    userdata_dir = Path(steam_path) / "userdata" / target_steamid3
+    if not userdata_dir.is_dir():
+        return False
+
+    try:
+        shutil.rmtree(userdata_dir)
+    except OSError:
+        return False
+
+    if not target_steamid64:
+        return True
+
+    vdf_path = Path(steam_path) / "config" / "loginusers.vdf"
+    if not vdf_path.is_file():
+        return True
+
+    try:
+        text = vdf_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+    parsed = _parse_vdf_simple(text)
+    users_key = None
+    for key in ("users", "Users"):
+        if key in parsed:
+            users_key = key
+            break
+    if users_key is None:
+        return True
+
+    users = parsed[users_key]
+    if target_steamid64 in users:
+        users.pop(target_steamid64, None)
+
+    lines = ['"users"', "{"]
+    for sid64, info in users.items():
+        lines.append(f'\t"{sid64}"')
+        lines.append("\t{")
+        for k, v in info.items():
+            if not isinstance(v, str):
+                continue
+            lines.append(f'\t\t"{k}"\t\t"{v}"')
+        lines.append("\t}")
+    lines.append("}")
+
+    try:
+        vdf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+
     return True
 
 

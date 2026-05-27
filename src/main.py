@@ -20,6 +20,7 @@ if getattr(sys, "frozen", False):
 
 from steam_manager import (
     CONFIG_FILE_GROUPS,
+    delete_steam_account,
     find_steam_path,
     get_cs2_accounts,
     get_steam_avatar_url,
@@ -259,6 +260,18 @@ class CS2ConfigManager(tk.Tk):
             cursor="hand2",
             font=(FONT_FAMILY, 10, "bold"),
             pady=6,
+        ).pack(fill=tk.X, pady=(0, 4))
+
+        tk.Button(
+            card,
+            text="🗑 管理账号删除",
+            command=self._open_account_delete_dialog,
+            bg=ERROR_COLOR,
+            fg="white",
+            relief=tk.FLAT,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+            pady=4,
         ).pack(fill=tk.X, pady=(0, 4))
 
         # Save account settings button
@@ -531,8 +544,9 @@ class CS2ConfigManager(tk.Tk):
         name = account.get("name", "?")
         steamid3 = account.get("steamid3", "")
         steamid64 = account.get("steamid64", "")
+        account_name = account.get("account_name", "").strip() or "未知"
         self._account_info_label.config(
-            text=f"{name}\nSteamID3: {steamid3}\nSteamID64: {steamid64}"
+            text=f"{name}\n登录账号: {account_name}\nSteamID3: {steamid3}\nSteamID64: {steamid64}"
         )
 
         # Check memory cache first
@@ -654,9 +668,7 @@ class CS2ConfigManager(tk.Tk):
 
     def _on_accounts_loaded(self, accounts: list[dict]) -> None:
         self._accounts = accounts
-        labels = [
-            f"{a['name']}  (SteamID3: {a['steamid3']})" for a in accounts
-        ]
+        labels = [self._format_account_label(a) for a in accounts]
 
         self._account_combo["values"] = labels
 
@@ -712,10 +724,15 @@ class CS2ConfigManager(tk.Tk):
     def _get_selected_account(self) -> dict | None:
         label = self._account_var.get()
         for acc in self._accounts:
-            expected = f"{acc['name']}  (SteamID3: {acc['steamid3']})"
+            expected = self._format_account_label(acc)
             if expected == label:
                 return acc
         return None
+
+    def _format_account_label(self, account: dict) -> str:
+        account_name = account.get("account_name", "").strip()
+        login_part = f"登录: {account_name}" if account_name else "登录: 未知"
+        return f"{account.get('name', '?')}  ({login_part} / SteamID3: {account.get('steamid3', '')})"
 
     def _switch_steam_account(self) -> None:
         """Switch Steam to the currently selected account."""
@@ -756,6 +773,91 @@ class CS2ConfigManager(tk.Tk):
         else:
             self._log(f"切换账号失败: {name}", "error")
             messagebox.showerror(APP_TITLE, "切换账号失败，请检查 Steam 路径和账号信息。")
+
+    def _open_account_delete_dialog(self) -> None:
+        if not self._accounts:
+            messagebox.showwarning(APP_TITLE, "当前没有可删除的账号。")
+            return
+        if not self._steam_path:
+            messagebox.showwarning(APP_TITLE, "未检测到 Steam 路径。")
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("删除账号")
+        dialog.configure(bg=BG_COLOR)
+        dialog.geometry("560x360")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(
+            dialog,
+            text="账号列表（点击对应删除按钮）",
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            font=(FONT_FAMILY, 11, "bold"),
+        ).pack(anchor=tk.W, padx=12, pady=(10, 8))
+
+        list_container = tk.Frame(dialog, bg=SURFACE_COLOR, padx=8, pady=8)
+        list_container.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        for account in self._accounts:
+            row = tk.Frame(list_container, bg=SURFACE_COLOR)
+            row.pack(fill=tk.X, pady=2)
+
+            account_name = account.get("account_name", "").strip() or "未知"
+            summary = (
+                f"{account.get('name', '?')} | 登录账号: {account_name} | "
+                f"SteamID3: {account.get('steamid3', '')}"
+            )
+            tk.Label(
+                row,
+                text=summary,
+                bg=SURFACE_COLOR,
+                fg=TEXT_COLOR,
+                anchor=tk.W,
+                font=(FONT_FAMILY, 9),
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+
+            tk.Button(
+                row,
+                text="删除",
+                bg=ERROR_COLOR,
+                fg="white",
+                relief=tk.FLAT,
+                cursor="hand2",
+                font=(FONT_FAMILY, 9),
+                command=lambda a=account, d=dialog: self._delete_account_entry(a, d),
+            ).pack(side=tk.RIGHT)
+
+    def _delete_account_entry(self, account: dict, dialog: tk.Toplevel) -> None:
+        if not self._steam_path:
+            messagebox.showwarning(APP_TITLE, "未检测到 Steam 路径。")
+            return
+
+        name = account.get("name", "?")
+        account_name = account.get("account_name", "").strip() or "未知"
+        sid3 = account.get("steamid3", "")
+        confirm = messagebox.askyesno(
+            APP_TITLE,
+            f"确认删除账号数据？\n\n昵称: {name}\n登录账号: {account_name}\nSteamID3: {sid3}\n\n"
+            "该操作会删除本地 userdata 账号目录，且不可恢复。",
+        )
+        if not confirm:
+            return
+
+        success = delete_steam_account(
+            self._steam_path,
+            target_steamid3=sid3,
+            target_steamid64=account.get("steamid64", ""),
+        )
+        if success:
+            self._log(f"已删除账号: {name} (登录账号: {account_name}, SteamID3: {sid3})", "success")
+            self._set_status(f"已删除账号: {name}")
+            dialog.destroy()
+            self._refresh_accounts()
+        else:
+            self._log(f"删除账号失败: {name} (SteamID3: {sid3})", "error")
+            messagebox.showerror(APP_TITLE, "删除账号失败，请检查日志。")
 
     def _save_profile(self) -> None:
         account = self._get_selected_account()
