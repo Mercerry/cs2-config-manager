@@ -416,8 +416,10 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
             # Steam VDF uses varying case for this key; set both to be safe
             info["MostRecent"] = "1"
             info["mostrecent"] = "1"
-            info["RememberPassword"] = info.get("RememberPassword", "1") or "1"
-            info["rememberpassword"] = info.get("rememberpassword", "1") or "1"
+            if "RememberPassword" not in info:
+                info["RememberPassword"] = "1"
+            if "rememberpassword" not in info:
+                info["rememberpassword"] = "1"
         else:
             info["MostRecent"] = "0"
             info["mostrecent"] = "0"
@@ -439,11 +441,12 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
     except OSError:
         return False
 
-    account_name = (
-        target_info.get("AccountName")
-        or target_info.get("accountname")
-        or ""
-    ).strip()
+    account_name = ""
+    for key in ("AccountName", "accountname"):
+        value = target_info.get(key)
+        if isinstance(value, str) and value.strip():
+            account_name = value.strip()
+            break
     if account_name and not _set_steam_autologin_user(account_name):
         return False
     return True
