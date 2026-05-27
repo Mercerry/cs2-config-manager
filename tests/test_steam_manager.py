@@ -20,6 +20,7 @@ from steam_manager import (
     get_cs2_accounts,
     get_steam_avatar_url,
     restart_steam,
+    switch_steam_account,
     CONFIG_FILE_GROUPS,
 )
 
@@ -271,6 +272,72 @@ class TestRestartSteam(unittest.TestCase):
             with patch("steam_manager.sys.platform", "win32"):
                 self.assertFalse(restart_steam(tmpdir))
             mock_run.assert_called_once()
+
+
+class TestSwitchSteamAccount(unittest.TestCase):
+    def test_updates_loginusers_and_windows_autologin_target(self):
+        current_steamid64 = "76561198000000000"
+        target_steamid64 = "76561198000000001"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "config"
+            config_dir.mkdir()
+            loginusers = config_dir / "loginusers.vdf"
+            loginusers.write_text(
+                f'''
+"users"
+{{
+    "{current_steamid64}"
+    {{
+        "AccountName"    "alice_login"
+        "PersonaName"    "Alice"
+        "MostRecent"     "1"
+    }}
+    "{target_steamid64}"
+    {{
+        "AccountName"    "bob_login"
+        "PersonaName"    "Bob"
+        "MostRecent"     "0"
+    }}
+}}
+''',
+                encoding="utf-8",
+            )
+
+            with patch("steam_manager.sys.platform", "win32"), \
+                 patch("steam_manager._set_steam_autologin_user", return_value=True) as mock_autologin:
+                self.assertTrue(switch_steam_account(tmpdir, target_steamid64))
+
+            mock_autologin.assert_called_once_with("bob_login")
+            users = _parse_vdf_simple(loginusers.read_text(encoding="utf-8"))["users"]
+            self.assertEqual(users[target_steamid64]["MostRecent"], "1")
+            self.assertEqual(users[current_steamid64]["MostRecent"], "0")
+            self.assertEqual(users[target_steamid64]["RememberPassword"], "1")
+
+    def test_returns_false_when_windows_autologin_update_fails(self):
+        target_steamid64 = "76561198000000001"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "config"
+            config_dir.mkdir()
+            (config_dir / "loginusers.vdf").write_text(
+                f'''
+"users"
+{{
+    "{target_steamid64}"
+    {{
+        "AccountName"    "bob_login"
+        "PersonaName"    "Bob"
+        "MostRecent"     "0"
+    }}
+}}
+''',
+                encoding="utf-8",
+            )
+
+            with patch("steam_manager.sys.platform", "win32"), \
+                 patch("steam_manager._set_steam_autologin_user", return_value=False):
+                self.assertFalse(switch_steam_account(tmpdir, target_steamid64))
 
 
 class TestConfigFileGroups(unittest.TestCase):
