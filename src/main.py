@@ -48,6 +48,7 @@ BG_COLOR = "#1a1a2e"
 SURFACE_COLOR = "#16213e"
 CARD_COLOR = "#0f3460"
 ACCENT_COLOR = "#e94560"
+HIGHLIGHT_COLOR = "#315ca8"
 TEXT_COLOR = "#eaeaea"
 SUBTEXT_COLOR = "#a0a0b0"
 SUCCESS_COLOR = "#4caf50"
@@ -56,6 +57,7 @@ ERROR_COLOR = "#f44336"
 FONT_FAMILY = "Segoe UI"
 AVATAR_SIZE = 28
 SYNC_GROUP_COLUMNS = 2
+ALL_CONFIG_FILE_GROUPS = tuple(CONFIG_FILE_GROUPS.keys())
 
 
 class CS2ConfigManager(tk.Tk):
@@ -77,8 +79,10 @@ class CS2ConfigManager(tk.Tk):
         self._profile_label_to_name: dict[str, str] = {}
         self._profile_storage_root = Path.home() / ".cs2-config-manager" / "profiles"
         self._account_backup_root = Path.home() / ".cs2-config-manager" / "account-backups"
+        self._avatar_cache_root = Path.home() / ".cs2-config-manager" / "avatars"
         self._avatar_cache: dict[str, tk.PhotoImage] = {}
         self._avatar_pending: set[str] = set()
+        self._avatar_cache_root.mkdir(parents=True, exist_ok=True)
 
         self._build_ui()
         self._fit_window_to_content()
@@ -232,8 +236,19 @@ class CS2ConfigManager(tk.Tk):
         self._dst_combo.bind("<<ComboboxSelected>>", self._on_account_change)
         self._dst_avatar_canvas, self._dst_avatar_label = self._build_avatar_badge(card, "目标账号")
 
+        tk.Button(
+            card,
+            text="⇄ 切换源/目标账号",
+            command=self._swap_accounts,
+            bg=HIGHLIGHT_COLOR,
+            fg=TEXT_COLOR,
+            relief=tk.FLAT,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+        ).pack(fill=tk.X, pady=(8, 0))
+
     def _build_file_group_checkboxes(self, parent: tk.Frame) -> None:
-        self._section_label(parent, "同步文件类型")
+        self._section_label(parent, "同步文件类型（仅账号同步）")
 
         card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=10)
         card.pack(fill=tk.X, pady=(4, 8))
@@ -315,18 +330,26 @@ class CS2ConfigManager(tk.Tk):
         self._sync_btn.pack(fill=tk.X, pady=(4, 0))
 
     def _build_profile_storage(self, parent: tk.Frame) -> None:
-        self._section_label(parent, "配置存储")
+        self._section_label(parent, "账号设置存储")
 
         card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=8)
         card.pack(fill=tk.X, pady=(4, 8))
 
         tk.Label(
             card,
-            text="配置档名称（留空将自动生成）:",
+            text="配置档名称（留空将按账号生成）:",
             bg=SURFACE_COLOR,
             fg=SUBTEXT_COLOR,
             font=(FONT_FAMILY, 9),
         ).pack(anchor=tk.W)
+
+        tk.Label(
+            card,
+            text="配置档保存/应用默认包含全部设置（含键位与视频）",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 8),
+        ).pack(anchor=tk.W, pady=(2, 4))
 
         tk.Entry(
             card,
@@ -340,7 +363,7 @@ class CS2ConfigManager(tk.Tk):
 
         tk.Button(
             card,
-            text="保存源账号配置到本地",
+            text="保存源账号完整设置（含键位/视频）",
             command=self._save_profile,
             bg=CARD_COLOR,
             fg=TEXT_COLOR,
@@ -381,7 +404,7 @@ class CS2ConfigManager(tk.Tk):
 
         tk.Button(
             btn_row,
-            text="应用到目标账号",
+            text="一键应用设置到目标账号",
             command=self._start_apply_profile,
             bg=CARD_COLOR,
             fg=TEXT_COLOR,
@@ -574,6 +597,18 @@ class CS2ConfigManager(tk.Tk):
     def _on_account_change(self, _event: tk.Event | None = None) -> None:
         self._update_account_avatars()
 
+    def _swap_accounts(self) -> None:
+        src_label = self._src_var.get()
+        dst_label = self._dst_var.get()
+        if not src_label or not dst_label:
+            messagebox.showwarning(APP_TITLE, "源账号或目标账号未选择。")
+            return
+        self._src_var.set(dst_label)
+        self._dst_var.set(src_label)
+        self._update_account_avatars()
+        self._set_status("已切换源账号与目标账号")
+        self._log("已切换源账号与目标账号。", "info")
+
     def _get_selected_account(self, var: tk.StringVar) -> dict | None:
         label = var.get()
         for acc in self._accounts:
@@ -587,6 +622,33 @@ class CS2ConfigManager(tk.Tk):
         dst = self._get_selected_account(self._dst_var)
         self._draw_avatar(self._src_avatar_canvas, self._src_avatar_label, src, "源账号")
         self._draw_avatar(self._dst_avatar_canvas, self._dst_avatar_label, dst, "目标账号")
+
+    def _avatar_cache_file(self, steamid64: str) -> Path | None:
+        """Return cache file path only for valid SteamID64 values."""
+        if not (steamid64.isdigit() and len(steamid64) == 17 and steamid64.startswith("7656119")):
+            return None
+        return self._avatar_cache_root / f"{steamid64}.cache"
+
+    def _load_avatar_from_disk(self, steamid64: str) -> tk.PhotoImage | None:
+        cache_file = self._avatar_cache_file(steamid64)
+        if cache_file is None or not cache_file.is_file() or Image is None or ImageTk is None:
+            return None
+        try:
+            image_data = cache_file.read_bytes()
+            if not image_data:
+                return None
+            with Image.open(BytesIO(image_data)) as img:
+                processed = img.copy()
+                if processed.mode not in ("RGB", "RGBA"):
+                    processed = processed.convert("RGBA")
+                if hasattr(Image, "Resampling"):
+                    resample_filter = Image.Resampling.LANCZOS
+                else:
+                    resample_filter = Image.LANCZOS
+                resized = processed.resize((AVATAR_SIZE, AVATAR_SIZE), resample_filter)
+                return ImageTk.PhotoImage(resized)
+        except (UnidentifiedImageError, OSError, ValueError, TypeError):
+            return None
 
     def _draw_avatar(
         self,
@@ -609,6 +671,12 @@ class CS2ConfigManager(tk.Tk):
                 cached = self._avatar_cache.get(steamid64)
                 if cached:
                     canvas.create_image(AVATAR_SIZE // 2, AVATAR_SIZE // 2, image=cached)
+                    label.config(text=text)
+                    return
+                disk_cached = self._load_avatar_from_disk(steamid64)
+                if disk_cached:
+                    self._avatar_cache[steamid64] = disk_cached
+                    canvas.create_image(AVATAR_SIZE // 2, AVATAR_SIZE // 2, image=disk_cached)
                     label.config(text=text)
                     return
                 self._ensure_avatar_fetch(steamid64)
@@ -651,6 +719,12 @@ class CS2ConfigManager(tk.Tk):
         self._avatar_pending.discard(steamid64)
         if not image_data or Image is None or ImageTk is None:
             return
+        cache_file = self._avatar_cache_file(steamid64)
+        if cache_file is not None:
+            try:
+                cache_file.write_bytes(image_data)
+            except OSError:
+                self._log(f"[提示] 头像缓存写入失败: {steamid64}", "warning")
         try:
             with Image.open(BytesIO(image_data)) as img:
                 processed = img.copy()
@@ -705,14 +779,10 @@ class CS2ConfigManager(tk.Tk):
             messagebox.showwarning(APP_TITLE, "请先选择源账号。")
             return
 
-        selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
-        if not selected_groups:
-            messagebox.showwarning(APP_TITLE, "请至少选择一种要保存的文件类型。")
-            return
-
-        profile_name = self._profile_name_var.get().strip() or f"{src['name']}_{src['steamid3']}"
+        selected_groups = ALL_CONFIG_FILE_GROUPS
+        profile_name = self._profile_name_var.get().strip() or f"{src['name']}_account_{src['steamid3']}"
         self._log("═" * 50)
-        self._log(f"开始保存配置档: {profile_name}", "info")
+        self._log(f"开始保存账号设置: {profile_name}", "info")
 
         results = save_profile_configs(
             source_account=src,
@@ -726,7 +796,7 @@ class CS2ConfigManager(tk.Tk):
         n_ok = len(results["copied"])
         n_skip = len(results["skipped"])
         n_fail = len(results["failed"])
-        summary = f"配置档保存完成：成功 {n_ok} 项，跳过 {n_skip} 项，失败 {n_fail} 项"
+        summary = f"账号设置保存完成：成功 {n_ok} 项，跳过 {n_skip} 项，失败 {n_fail} 项"
         self._log(summary, "success" if n_fail == 0 else "warning")
         self._log("═" * 50)
         self._set_status(summary)
@@ -749,10 +819,7 @@ class CS2ConfigManager(tk.Tk):
             messagebox.showwarning(APP_TITLE, "请先选择一个已保存配置档。")
             return
 
-        selected_groups = [g for g, v in self._sync_vars.items() if v.get()]
-        if not selected_groups:
-            messagebox.showwarning(APP_TITLE, "请至少选择一种要应用的文件类型。")
-            return
+        selected_groups = ALL_CONFIG_FILE_GROUPS
 
         confirm = messagebox.askyesno(
             APP_TITLE,
