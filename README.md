@@ -15,6 +15,7 @@
 | 💾 配置存储 | 可将某个账号配置保存为本地配置档，后续直接应用到其他账号 |
 | 🔒 自动备份 | 同步前自动将目标文件备份为 `.bak_YYYYMMDD_HHMMSS` |
 | 🗂️ 账户备份 | 可在同步前按日期备份目标账号配置到本地备份目录 |
+| 🖼 头像自动回退 | 先解析 Steam MiniProfile 抓头像，失败时可用 `api.txt` 中 Steam Web API Key 回退获取 |
 | 📝 操作日志 | 实时显示每一步的操作结果 |
 
 ### 支持同步的文件
@@ -36,6 +37,8 @@
 ### 方式一：下载发布版 EXE（推荐）
 
 从 [Releases](../../releases) 页面下载最新的 `CS2ConfigManager.exe`，双击运行即可，无需安装 Python。
+
+> 如需启用头像 API 回退，请在 `CS2ConfigManager.exe` 同目录放置 `api.txt`，文件第一行填写 Steam Web API Key。
 
 ### 方式二：从源码运行
 
