@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 from datetime import datetime
+from glob import has_magic
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -14,6 +15,17 @@ def _backup_path(dest: Path) -> Path:
     """Return a timestamped backup path for *dest*."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return dest.with_name(f"{dest.name}.bak_{ts}")
+
+
+def _resolve_existing_files(base_dir: Path, file_spec: str) -> list[Path]:
+    """Resolve file_spec under base_dir and return existing files."""
+    if has_magic(file_spec):
+        return sorted(path for path in base_dir.glob(file_spec) if path.is_file())
+
+    candidate = base_dir / file_spec
+    if candidate.is_file():
+        return [candidate]
+    return []
 
 
 def backup_account_configs(
@@ -48,30 +60,32 @@ def backup_account_configs(
     for group_name in file_groups:
         entries = group_definitions.get(group_name, [])
         for path_key, filename in entries:
-            src_file = Path(account[path_key]) / filename
             dst_dir = backup_dir / path_key
-            dst_file = dst_dir / filename
+            src_root = Path(account[path_key])
+            src_files = _resolve_existing_files(src_root, filename)
 
-            if not src_file.is_file():
-                msg = f"[跳过] {group_name} – 待备份文件不存在: {src_file}"
+            if not src_files:
+                msg = f"[跳过] {group_name} – 待备份文件不存在: {src_root / filename}"
                 log(msg)
                 results["skipped"].append(msg)
                 continue
 
-            try:
-                dst_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_file, dst_file)
-                msg = f"[备份] {group_name}: {src_file} → {dst_file}"
-                log(msg)
-                results["copied"].append(msg)
-            except PermissionError as exc:
-                msg = f"[失败] {group_name} – 备份权限不足: {exc}"
-                log(msg)
-                results["failed"].append(msg)
-            except OSError as exc:
-                msg = f"[失败] {group_name} – 备份文件操作错误: {exc}"
-                log(msg)
-                results["failed"].append(msg)
+            for src_file in src_files:
+                dst_file = dst_dir / src_file.name
+                try:
+                    dst_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_file, dst_file)
+                    msg = f"[备份] {group_name}: {src_file} → {dst_file}"
+                    log(msg)
+                    results["copied"].append(msg)
+                except PermissionError as exc:
+                    msg = f"[失败] {group_name} – 备份权限不足: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
+                except OSError as exc:
+                    msg = f"[失败] {group_name} – 备份文件操作错误: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
 
     results["backup_dir"] = str(backup_dir)
     return results
@@ -116,37 +130,39 @@ def sync_configs(
     for group_name in file_groups:
         entries = group_definitions.get(group_name, [])
         for path_key, filename in entries:
-            src_file = Path(source_account[path_key]) / filename
+            src_root = Path(source_account[path_key])
+            src_files = _resolve_existing_files(src_root, filename)
             dst_dir = Path(dest_account[path_key])
-            dst_file = dst_dir / filename
 
-            if not src_file.is_file():
-                msg = f"[跳过] {group_name} – 源文件不存在: {src_file}"
+            if not src_files:
+                msg = f"[跳过] {group_name} – 源文件不存在: {src_root / filename}"
                 log(msg)
                 results["skipped"].append(msg)
                 continue
 
-            try:
-                dst_dir.mkdir(parents=True, exist_ok=True)
+            for src_file in src_files:
+                dst_file = dst_dir / src_file.name
+                try:
+                    dst_dir.mkdir(parents=True, exist_ok=True)
 
-                if dst_file.exists() and backup:
-                    bak = _backup_path(dst_file)
-                    shutil.copy2(dst_file, bak)
-                    log(f"[备份] {dst_file.name} → {bak.name}")
+                    if dst_file.exists() and backup:
+                        bak = _backup_path(dst_file)
+                        shutil.copy2(dst_file, bak)
+                        log(f"[备份] {dst_file.name} → {bak.name}")
 
-                shutil.copy2(src_file, dst_file)
-                msg = f"[成功] {group_name}: {src_file} → {dst_file}"
-                log(msg)
-                results["copied"].append(msg)
+                    shutil.copy2(src_file, dst_file)
+                    msg = f"[成功] {group_name}: {src_file} → {dst_file}"
+                    log(msg)
+                    results["copied"].append(msg)
 
-            except PermissionError as exc:
-                msg = f"[失败] {group_name} – 权限不足: {exc}"
-                log(msg)
-                results["failed"].append(msg)
-            except OSError as exc:
-                msg = f"[失败] {group_name} – 文件操作错误: {exc}"
-                log(msg)
-                results["failed"].append(msg)
+                except PermissionError as exc:
+                    msg = f"[失败] {group_name} – 权限不足: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
+                except OSError as exc:
+                    msg = f"[失败] {group_name} – 文件操作错误: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
 
     return results
 
@@ -227,30 +243,32 @@ def save_profile_configs(
     for group_name in file_groups:
         entries = group_definitions.get(group_name, [])
         for path_key, filename in entries:
-            src_file = Path(source_account[path_key]) / filename
+            src_root = Path(source_account[path_key])
+            src_files = _resolve_existing_files(src_root, filename)
             dst_dir = profile_dir / path_key
-            dst_file = dst_dir / filename
 
-            if not src_file.is_file():
-                msg = f"[跳过] {group_name} – 源文件不存在: {src_file}"
+            if not src_files:
+                msg = f"[跳过] {group_name} – 源文件不存在: {src_root / filename}"
                 log(msg)
                 results["skipped"].append(msg)
                 continue
 
-            try:
-                dst_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_file, dst_file)
-                msg = f"[成功] {group_name}: {src_file} → {dst_file}"
-                log(msg)
-                results["copied"].append(msg)
-            except PermissionError as exc:
-                msg = f"[失败] {group_name} – 权限不足: {exc}"
-                log(msg)
-                results["failed"].append(msg)
-            except OSError as exc:
-                msg = f"[失败] {group_name} – 文件操作错误: {exc}"
-                log(msg)
-                results["failed"].append(msg)
+            for src_file in src_files:
+                dst_file = dst_dir / src_file.name
+                try:
+                    dst_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_file, dst_file)
+                    msg = f"[成功] {group_name}: {src_file} → {dst_file}"
+                    log(msg)
+                    results["copied"].append(msg)
+                except PermissionError as exc:
+                    msg = f"[失败] {group_name} – 权限不足: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
+                except OSError as exc:
+                    msg = f"[失败] {group_name} – 文件操作错误: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
 
     try:
         meta = {
@@ -303,35 +321,37 @@ def apply_saved_profile_configs(
     for group_name in file_groups:
         entries = group_definitions.get(group_name, [])
         for path_key, filename in entries:
-            src_file = profile_dir / path_key / filename
+            src_root = profile_dir / path_key
+            src_files = _resolve_existing_files(src_root, filename)
             dst_dir = Path(dest_account[path_key])
-            dst_file = dst_dir / filename
 
-            if not src_file.is_file():
-                msg = f"[跳过] {group_name} – 配置档文件不存在: {src_file}"
+            if not src_files:
+                msg = f"[跳过] {group_name} – 配置档文件不存在: {src_root / filename}"
                 log(msg)
                 results["skipped"].append(msg)
                 continue
 
-            try:
-                dst_dir.mkdir(parents=True, exist_ok=True)
+            for src_file in src_files:
+                dst_file = dst_dir / src_file.name
+                try:
+                    dst_dir.mkdir(parents=True, exist_ok=True)
 
-                if dst_file.exists() and backup:
-                    bak = _backup_path(dst_file)
-                    shutil.copy2(dst_file, bak)
-                    log(f"[备份] {dst_file.name} → {bak.name}")
+                    if dst_file.exists() and backup:
+                        bak = _backup_path(dst_file)
+                        shutil.copy2(dst_file, bak)
+                        log(f"[备份] {dst_file.name} → {bak.name}")
 
-                shutil.copy2(src_file, dst_file)
-                msg = f"[成功] {group_name}: {src_file} → {dst_file}"
-                log(msg)
-                results["copied"].append(msg)
-            except PermissionError as exc:
-                msg = f"[失败] {group_name} – 权限不足: {exc}"
-                log(msg)
-                results["failed"].append(msg)
-            except OSError as exc:
-                msg = f"[失败] {group_name} – 文件操作错误: {exc}"
-                log(msg)
-                results["failed"].append(msg)
+                    shutil.copy2(src_file, dst_file)
+                    msg = f"[成功] {group_name}: {src_file} → {dst_file}"
+                    log(msg)
+                    results["copied"].append(msg)
+                except PermissionError as exc:
+                    msg = f"[失败] {group_name} – 权限不足: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
+                except OSError as exc:
+                    msg = f"[失败] {group_name} – 文件操作错误: {exc}"
+                    log(msg)
+                    results["failed"].append(msg)
 
     return results
