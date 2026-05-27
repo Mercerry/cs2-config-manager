@@ -57,7 +57,7 @@ ERROR_COLOR = "#f44336"
 FONT_FAMILY = "Segoe UI"
 AVATAR_SIZE = 28
 SYNC_GROUP_COLUMNS = 2
-ACCOUNT_SETTINGS_GROUPS = list(CONFIG_FILE_GROUPS.keys())
+ALL_CONFIG_FILE_GROUPS = tuple(CONFIG_FILE_GROUPS.keys())
 
 
 class CS2ConfigManager(tk.Tk):
@@ -248,7 +248,7 @@ class CS2ConfigManager(tk.Tk):
         ).pack(fill=tk.X, pady=(8, 0))
 
     def _build_file_group_checkboxes(self, parent: tk.Frame) -> None:
-        self._section_label(parent, "同步文件类型")
+        self._section_label(parent, "同步文件类型（仅账号同步）")
 
         card = tk.Frame(parent, bg=SURFACE_COLOR, padx=12, pady=10)
         card.pack(fill=tk.X, pady=(4, 8))
@@ -342,6 +342,14 @@ class CS2ConfigManager(tk.Tk):
             fg=SUBTEXT_COLOR,
             font=(FONT_FAMILY, 9),
         ).pack(anchor=tk.W)
+
+        tk.Label(
+            card,
+            text="配置档保存/应用默认包含全部设置（含键位与视频）",
+            bg=SURFACE_COLOR,
+            fg=SUBTEXT_COLOR,
+            font=(FONT_FAMILY, 8),
+        ).pack(anchor=tk.W, pady=(2, 4))
 
         tk.Entry(
             card,
@@ -593,7 +601,7 @@ class CS2ConfigManager(tk.Tk):
         src_label = self._src_var.get()
         dst_label = self._dst_var.get()
         if not src_label or not dst_label:
-            messagebox.showwarning(APP_TITLE, "请先选择源账号和目标账号。")
+            messagebox.showwarning(APP_TITLE, "源账号或目标账号未选择。")
             return
         self._src_var.set(dst_label)
         self._dst_var.set(src_label)
@@ -615,12 +623,15 @@ class CS2ConfigManager(tk.Tk):
         self._draw_avatar(self._src_avatar_canvas, self._src_avatar_label, src, "源账号")
         self._draw_avatar(self._dst_avatar_canvas, self._dst_avatar_label, dst, "目标账号")
 
-    def _avatar_cache_file(self, steamid64: str) -> Path:
-        return self._avatar_cache_root / f"{steamid64}.img"
+    def _avatar_cache_file(self, steamid64: str) -> Path | None:
+        """Return cache file path only for valid SteamID64 values."""
+        if not (steamid64.isdigit() and len(steamid64) == 17 and steamid64.startswith("7656119")):
+            return None
+        return self._avatar_cache_root / f"{steamid64}.cache"
 
     def _load_avatar_from_disk(self, steamid64: str) -> tk.PhotoImage | None:
         cache_file = self._avatar_cache_file(steamid64)
-        if not cache_file.is_file() or Image is None or ImageTk is None:
+        if cache_file is None or not cache_file.is_file() or Image is None or ImageTk is None:
             return None
         try:
             image_data = cache_file.read_bytes()
@@ -709,11 +720,11 @@ class CS2ConfigManager(tk.Tk):
         if not image_data or Image is None or ImageTk is None:
             return
         cache_file = self._avatar_cache_file(steamid64)
-        try:
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            cache_file.write_bytes(image_data)
-        except OSError:
-            pass
+        if cache_file is not None:
+            try:
+                cache_file.write_bytes(image_data)
+            except OSError:
+                self._log(f"[提示] 头像缓存写入失败: {steamid64}", "warning")
         try:
             with Image.open(BytesIO(image_data)) as img:
                 processed = img.copy()
@@ -768,8 +779,8 @@ class CS2ConfigManager(tk.Tk):
             messagebox.showwarning(APP_TITLE, "请先选择源账号。")
             return
 
-        selected_groups = list(ACCOUNT_SETTINGS_GROUPS)
-        profile_name = self._profile_name_var.get().strip() or f"account_{src['steamid3']}"
+        selected_groups = ALL_CONFIG_FILE_GROUPS
+        profile_name = self._profile_name_var.get().strip() or f"{src['name']}_account_{src['steamid3']}"
         self._log("═" * 50)
         self._log(f"开始保存账号设置: {profile_name}", "info")
 
@@ -808,7 +819,7 @@ class CS2ConfigManager(tk.Tk):
             messagebox.showwarning(APP_TITLE, "请先选择一个已保存配置档。")
             return
 
-        selected_groups = list(ACCOUNT_SETTINGS_GROUPS)
+        selected_groups = ALL_CONFIG_FILE_GROUPS
 
         confirm = messagebox.askyesno(
             APP_TITLE,
