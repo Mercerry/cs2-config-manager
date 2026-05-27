@@ -383,6 +383,8 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
     Update Steam's loginusers.vdf to set the target account as the most recent.
 
     Sets MostRecent=1 for the target and MostRecent=0 for others.
+    On Windows, also updates Steam's AutoLoginUser registry value so the
+    restarted client signs into the selected account instead of the previous one.
     Returns True on success, False on failure.
     """
     vdf_path = Path(steam_path) / "config" / "loginusers.vdf"
@@ -408,11 +410,23 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
     if target_steamid64 not in users:
         return False
 
+    target_info = users[target_steamid64]
+    account_name = ""
+    for key in ("AccountName", "accountname"):
+        value = target_info.get(key)
+        if isinstance(value, str) and value.strip():
+            account_name = value.strip()
+            break
+    if account_name and not _set_steam_autologin_user(account_name):
+        return False
+
     for sid64, info in users.items():
         if sid64 == target_steamid64:
             # Steam VDF uses varying case for this key; set both to be safe
             info["MostRecent"] = "1"
             info["mostrecent"] = "1"
+            if "RememberPassword" not in info and "rememberpassword" not in info:
+                info["RememberPassword"] = "1"
         else:
             info["MostRecent"] = "0"
             info["mostrecent"] = "0"
@@ -431,6 +445,24 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
 
     try:
         vdf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def _set_steam_autologin_user(account_name: str) -> bool:
+    """Update Steam's Windows registry keys for auto-login."""
+    if sys.platform != "win32":
+        return True
+    if not account_name:
+        return False
+
+    try:
+        import winreg
+
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            winreg.SetValueEx(key, "AutoLoginUser", 0, winreg.REG_SZ, account_name)
+            winreg.SetValueEx(key, "RememberPassword", 0, winreg.REG_DWORD, 1)
         return True
     except OSError:
         return False
