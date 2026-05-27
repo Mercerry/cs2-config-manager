@@ -496,8 +496,7 @@ def delete_steam_account(
         return True
 
     users = parsed[users_key]
-    if target_steamid64 in users:
-        users.pop(target_steamid64, None)
+    users.pop(target_steamid64, None)
 
     lines = ['"users"', "{"]
     for sid64, info in users.items():
