@@ -344,7 +344,7 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
 
 
 def restart_steam(steam_path: str) -> bool:
-    """Restart Steam by terminating existing process and launching steam.exe."""
+    """Restart Steam on Windows; return True on restart success, else False."""
     if sys.platform != "win32":
         return False
 
