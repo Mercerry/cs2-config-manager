@@ -704,8 +704,10 @@ class CS2ConfigManager(tk.Tk):
         self._avatar_cache.pop(steamid64, None)
         self._avatar_pending.discard(steamid64)
         self._update_avatar_display()
+        # 打印头像地址到日志，方便调试
         self._log(f"正在重新加载头像: {account.get('name', steamid64)}", "info")
-        self._set_status("正在重新加载头像…")
+        self._log(f"头像 URL: {get_steam_avatar_url(steamid64) or '未找到'}", "info")
+        # self._set_status("正在重新加载头像…")
 
     def _get_selected_account(self) -> dict | None:
         label = self._account_var.get()
