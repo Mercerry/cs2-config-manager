@@ -231,7 +231,8 @@ def _read_steam_api_key() -> Optional[str]:
         except OSError:
             continue
         if content:
-            return content.splitlines()[0].strip().lstrip("\ufeff")
+            normalized_content = content.lstrip("\ufeff")
+            return normalized_content.splitlines()[0].strip()
     return None
 
 
