@@ -277,3 +277,61 @@ CONFIG_FILE_GROUPS = {
         ("cs2_cfg_path", "practiceserver.cfg"),
     ],
 }
+
+
+def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
+    """
+    Update Steam's loginusers.vdf to set the target account as the most recent.
+
+    Sets MostRecent=1 for the target and MostRecent=0 for others.
+    Returns True on success, False on failure.
+    """
+    vdf_path = Path(steam_path) / "config" / "loginusers.vdf"
+    if not vdf_path.is_file():
+        return False
+
+    try:
+        text = vdf_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+    # Update MostRecent flags: set target to "1", others to "0"
+    parsed = _parse_vdf_simple(text)
+    users_key = None
+    for key in ("users", "Users"):
+        if key in parsed:
+            users_key = key
+            break
+    if users_key is None:
+        return False
+
+    users = parsed[users_key]
+    if target_steamid64 not in users:
+        return False
+
+    for sid64, info in users.items():
+        if sid64 == target_steamid64:
+            # Steam VDF uses varying case for this key; set both to be safe
+            info["MostRecent"] = "1"
+            info["mostrecent"] = "1"
+        else:
+            info["MostRecent"] = "0"
+            info["mostrecent"] = "0"
+
+    # Rebuild VDF content
+    lines = ['"users"', "{"]
+    for sid64, info in users.items():
+        lines.append(f'\t"{sid64}"')
+        lines.append("\t{")
+        for k, v in info.items():
+            if not isinstance(v, str):
+                continue
+            lines.append(f'\t\t"{k}"\t\t"{v}"')
+        lines.append("\t}")
+    lines.append("}")
+
+    try:
+        vdf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False

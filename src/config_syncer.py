@@ -355,3 +355,20 @@ def apply_saved_profile_configs(
                     results["failed"].append(msg)
 
     return results
+
+
+def delete_saved_profile(storage_root: Path | str, profile_name: str) -> bool:
+    """
+    Delete a saved profile directory.
+
+    Returns True if successfully deleted, False otherwise.
+    """
+    safe_name = _sanitize_profile_name(profile_name)
+    profile_dir = Path(storage_root) / safe_name
+    if not profile_dir.is_dir():
+        return False
+    try:
+        shutil.rmtree(profile_dir)
+        return True
+    except OSError:
+        return False
