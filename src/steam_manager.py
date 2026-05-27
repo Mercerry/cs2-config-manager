@@ -204,7 +204,7 @@ def _extract_best_srcset_url(srcset: str) -> Optional[str]:
                 scale = float(parts[1][:-1])
             except ValueError:
                 scale = 1.0
-        if scale >= best_scale:
+        if scale > best_scale:
             best_scale = scale
             best_url = url
     return best_url
@@ -231,8 +231,8 @@ def _read_steam_api_key() -> Optional[str]:
         except OSError:
             continue
         if content:
-            normalized_content = content.lstrip("\ufeff")
-            return normalized_content.splitlines()[0].strip()
+            content_without_bom = content.lstrip("\ufeff")
+            return content_without_bom.splitlines()[0].strip()
     return None
 
 
