@@ -18,6 +18,7 @@ from steam_manager import (
     find_steam_path,
     get_cs2_accounts,
     get_steam_avatar_url,
+    restart_steam,
     CONFIG_FILE_GROUPS,
 )
 
@@ -218,6 +219,37 @@ class TestGetSteamAvatarUrl(unittest.TestCase):
             url = get_steam_avatar_url("76561198000000000")
 
         self.assertEqual(url, "https://avatars.steamstatic.com/plain_full.jpg")
+
+
+class TestRestartSteam(unittest.TestCase):
+    def test_returns_false_when_steam_exe_missing(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertFalse(restart_steam(tmpdir))
+
+    @patch("steam_manager.subprocess.Popen")
+    @patch("steam_manager.subprocess.run")
+    def test_restarts_steam_when_exe_exists(self, mock_run, mock_popen):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            steam_exe = Path(tmpdir) / "steam.exe"
+            steam_exe.write_text("", encoding="utf-8")
+
+            self.assertTrue(restart_steam(tmpdir))
+            mock_run.assert_called_once()
+            mock_popen.assert_called_once()
+
+    @patch("steam_manager.subprocess.Popen", side_effect=OSError("launch failed"))
+    @patch("steam_manager.subprocess.run")
+    def test_returns_false_when_launch_fails(self, mock_run, mock_popen):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            steam_exe = Path(tmpdir) / "steam.exe"
+            steam_exe.write_text("", encoding="utf-8")
+
+            self.assertFalse(restart_steam(tmpdir))
+            mock_run.assert_called_once()
+            mock_popen.assert_called_once()
 
 
 class TestConfigFileGroups(unittest.TestCase):

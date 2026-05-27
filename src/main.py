@@ -23,6 +23,7 @@ from steam_manager import (
     find_steam_path,
     get_cs2_accounts,
     get_steam_avatar_url,
+    restart_steam,
     switch_steam_account,
     STEAM_HTTP_USER_AGENT,
 )
@@ -234,6 +235,18 @@ class CS2ConfigManager(tk.Tk):
             justify=tk.LEFT,
         )
         self._account_info_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+
+        tk.Button(
+            card,
+            text="🖼 重新加载头像",
+            command=self._reload_selected_avatar,
+            bg=CARD_COLOR,
+            fg=TEXT_COLOR,
+            relief=tk.FLAT,
+            cursor="hand2",
+            font=(FONT_FAMILY, 9),
+            pady=4,
+        ).pack(fill=tk.X, pady=(0, 6))
 
         # Switch Steam account button
         tk.Button(
@@ -677,6 +690,23 @@ class CS2ConfigManager(tk.Tk):
     def _on_account_change(self, _event: "tk.Event | None" = None) -> None:
         self._update_avatar_display()
 
+    def _reload_selected_avatar(self) -> None:
+        account = self._get_selected_account()
+        if not account:
+            messagebox.showwarning(APP_TITLE, "请先选择一个账号。")
+            return
+
+        steamid64 = account.get("steamid64", "")
+        if not steamid64:
+            messagebox.showwarning(APP_TITLE, "该账号没有有效的 SteamID64。")
+            return
+
+        self._avatar_cache.pop(steamid64, None)
+        self._avatar_pending.discard(steamid64)
+        self._update_avatar_display()
+        self._log(f"正在重新加载头像: {account.get('name', steamid64)}", "info")
+        self._set_status("正在重新加载头像…")
+
     def _get_selected_account(self) -> dict | None:
         label = self._account_var.get()
         for acc in self._accounts:
@@ -705,16 +735,22 @@ class CS2ConfigManager(tk.Tk):
         confirm = messagebox.askyesno(
             APP_TITLE,
             f"将切换 Steam 到账号:\n  {name}\n\n"
-            "切换后需要重启 Steam 才能生效。\n确认继续？",
+            "切换后将自动重启 Steam。\n确认继续？",
         )
         if not confirm:
             return
 
         success = switch_steam_account(self._steam_path, steamid64)
         if success:
-            self._log(f"已切换 Steam 到账号: {name}，请重启 Steam。", "success")
-            self._set_status(f"已切换到 {name}，请重启 Steam")
-            messagebox.showinfo(APP_TITLE, f"已切换到 {name}\n请重启 Steam 使切换生效。")
+            restarted = restart_steam(self._steam_path)
+            if restarted:
+                self._log(f"已切换 Steam 到账号: {name}，并自动重启 Steam。", "success")
+                self._set_status(f"已切换到 {name}，Steam 已自动重启")
+                messagebox.showinfo(APP_TITLE, f"已切换到 {name}\nSteam 已自动重启。")
+            else:
+                self._log(f"已切换 Steam 到账号: {name}，但自动重启 Steam 失败。", "warning")
+                self._set_status(f"已切换到 {name}，自动重启失败")
+                messagebox.showwarning(APP_TITLE, f"已切换到 {name}\n但自动重启 Steam 失败，请手动重启。")
         else:
             self._log(f"切换账号失败: {name}", "error")
             messagebox.showerror(APP_TITLE, "切换账号失败，请检查 Steam 路径和账号信息。")

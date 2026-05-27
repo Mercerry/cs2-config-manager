@@ -5,6 +5,7 @@ Supports Windows via Registry lookup and common path fallbacks.
 
 import os
 import re
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -332,6 +333,33 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
 
     try:
         vdf_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def restart_steam(steam_path: str) -> bool:
+    """Restart Steam by terminating existing process and launching steam.exe."""
+    steam_exe = Path(steam_path) / "steam.exe"
+    if not steam_exe.is_file():
+        return False
+
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        subprocess.run(
+            ["taskkill", "/IM", "steam.exe", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+        subprocess.Popen(
+            [str(steam_exe)],
+            cwd=str(Path(steam_path)),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
         return True
     except OSError:
         return False
