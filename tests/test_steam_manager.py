@@ -313,6 +313,7 @@ class TestSwitchSteamAccount(unittest.TestCase):
             self.assertEqual(users[target_steamid64]["MostRecent"], "1")
             self.assertEqual(users[current_steamid64]["MostRecent"], "0")
             self.assertEqual(users[target_steamid64]["RememberPassword"], "1")
+            self.assertNotIn("RememberPassword", users[current_steamid64])
 
     def test_returns_false_when_windows_autologin_update_fails(self):
         target_steamid64 = "76561198000000001"

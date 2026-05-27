@@ -416,10 +416,8 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
             # Steam VDF uses varying case for this key; set both to be safe
             info["MostRecent"] = "1"
             info["mostrecent"] = "1"
-            if "RememberPassword" not in info:
+            if "RememberPassword" not in info and "rememberpassword" not in info:
                 info["RememberPassword"] = "1"
-            if "rememberpassword" not in info:
-                info["rememberpassword"] = "1"
         else:
             info["MostRecent"] = "0"
             info["mostrecent"] = "0"
