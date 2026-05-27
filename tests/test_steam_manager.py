@@ -4,6 +4,7 @@ Tests for steam_manager – cross-platform (no Windows registry required).
 
 import sys
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -223,14 +224,12 @@ class TestGetSteamAvatarUrl(unittest.TestCase):
 
 class TestRestartSteam(unittest.TestCase):
     def test_returns_false_when_steam_exe_missing(self):
-        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             self.assertFalse(restart_steam(tmpdir))
 
     @patch("steam_manager.subprocess.Popen")
     @patch("steam_manager.subprocess.run")
     def test_restarts_steam_when_exe_exists(self, mock_run, mock_popen):
-        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             steam_exe = Path(tmpdir) / "steam.exe"
             steam_exe.write_text("", encoding="utf-8")
@@ -242,7 +241,6 @@ class TestRestartSteam(unittest.TestCase):
     @patch("steam_manager.subprocess.Popen", side_effect=OSError("launch failed"))
     @patch("steam_manager.subprocess.run")
     def test_returns_false_when_launch_fails(self, mock_run, mock_popen):
-        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             steam_exe = Path(tmpdir) / "steam.exe"
             steam_exe.write_text("", encoding="utf-8")

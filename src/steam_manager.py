@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 CS2_APP_ID = "730"
 STEAM_HTTP_USER_AGENT = "CS2ConfigManager/1.1"
+SUBPROCESS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _read_registry_steam_path() -> Optional[str]:
@@ -344,21 +345,20 @@ def restart_steam(steam_path: str) -> bool:
     if not steam_exe.is_file():
         return False
 
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         subprocess.run(
             ["taskkill", "/IM", "steam.exe", "/F"],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
+            creationflags=SUBPROCESS_NO_WINDOW,
         )
         subprocess.Popen(
             [str(steam_exe)],
             cwd=str(Path(steam_path)),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
+            creationflags=SUBPROCESS_NO_WINDOW,
         )
         return True
     except OSError:
