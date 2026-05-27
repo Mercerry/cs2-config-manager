@@ -15,7 +15,11 @@ from urllib.request import Request, urlopen
 
 CS2_APP_ID = "730"
 STEAM_HTTP_USER_AGENT = "CS2ConfigManager/1.1"
-SUBPROCESS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+SUBPROCESS_NO_WINDOW = (
+    getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if sys.platform == "win32"
+    else 0
+)
 
 
 def _read_registry_steam_path() -> Optional[str]:
@@ -341,6 +345,9 @@ def switch_steam_account(steam_path: str, target_steamid64: str) -> bool:
 
 def restart_steam(steam_path: str) -> bool:
     """Restart Steam by terminating existing process and launching steam.exe."""
+    if sys.platform != "win32":
+        return False
+
     steam_exe = Path(steam_path) / "steam.exe"
     if not steam_exe.is_file():
         return False

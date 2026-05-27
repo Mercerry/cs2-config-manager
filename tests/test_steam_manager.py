@@ -234,7 +234,8 @@ class TestRestartSteam(unittest.TestCase):
             steam_exe = Path(tmpdir) / "steam.exe"
             steam_exe.write_text("", encoding="utf-8")
 
-            self.assertTrue(restart_steam(tmpdir))
+            with patch("steam_manager.sys.platform", "win32"):
+                self.assertTrue(restart_steam(tmpdir))
             mock_run.assert_called_once()
             mock_popen.assert_called_once()
 
@@ -245,9 +246,20 @@ class TestRestartSteam(unittest.TestCase):
             steam_exe = Path(tmpdir) / "steam.exe"
             steam_exe.write_text("", encoding="utf-8")
 
-            self.assertFalse(restart_steam(tmpdir))
+            with patch("steam_manager.sys.platform", "win32"):
+                self.assertFalse(restart_steam(tmpdir))
             mock_run.assert_called_once()
             mock_popen.assert_called_once()
+
+    @patch("steam_manager.subprocess.run", side_effect=OSError("taskkill failed"))
+    def test_returns_false_when_taskkill_fails(self, mock_run):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            steam_exe = Path(tmpdir) / "steam.exe"
+            steam_exe.write_text("", encoding="utf-8")
+
+            with patch("steam_manager.sys.platform", "win32"):
+                self.assertFalse(restart_steam(tmpdir))
+            mock_run.assert_called_once()
 
 
 class TestConfigFileGroups(unittest.TestCase):
