@@ -16,6 +16,7 @@ from steam_manager import (
     _steamid64_to_steamid3,
     _parse_vdf_simple,
     _common_steam_paths,
+    delete_steam_account,
     find_steam_path,
     get_cs2_accounts,
     get_steam_avatar_url,
@@ -160,6 +161,35 @@ class TestGetCs2Accounts(unittest.TestCase):
             self.assertEqual(len(accounts), 1)
             self.assertEqual(accounts[0]["name"], "TestPlayer")
             self.assertEqual(accounts[0]["steamid64"], steamid64_correct)
+            self.assertEqual(accounts[0]["account_name"], "")
+
+    def test_account_name_from_loginusers(self):
+        sid3 = "39734272"
+        steamid64 = str(39734272 + 76561197960265728)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cs2_dir = Path(tmpdir) / "userdata" / sid3 / "730"
+            cs2_dir.mkdir(parents=True)
+
+            cfg_dir = Path(tmpdir) / "config"
+            cfg_dir.mkdir()
+            (cfg_dir / "loginusers.vdf").write_text(
+                f'''
+"users"
+{{
+    "{steamid64}"
+    {{
+        "PersonaName"    "TestPlayer"
+        "AccountName"    "test_login"
+    }}
+}}
+''',
+                encoding="utf-8",
+            )
+
+            accounts = get_cs2_accounts(tmpdir)
+            self.assertEqual(len(accounts), 1)
+            self.assertEqual(accounts[0]["account_name"], "test_login")
 
 
 class TestGetSteamAvatarUrl(unittest.TestCase):
@@ -342,6 +372,90 @@ class TestSwitchSteamAccount(unittest.TestCase):
 
             users = _parse_vdf_simple((config_dir / "loginusers.vdf").read_text(encoding="utf-8"))["users"]
             self.assertEqual(users[target_steamid64]["MostRecent"], "0")
+
+    def test_forces_target_remember_password_when_existing_zero(self):
+        current_steamid64 = "76561198000000000"
+        target_steamid64 = "76561198000000001"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "config"
+            config_dir.mkdir()
+            loginusers = config_dir / "loginusers.vdf"
+            loginusers.write_text(
+                f'''
+"users"
+{{
+    "{current_steamid64}"
+    {{
+        "AccountName"    "alice_login"
+        "PersonaName"    "Alice"
+        "MostRecent"     "1"
+        "RememberPassword" "1"
+    }}
+    "{target_steamid64}"
+    {{
+        "AccountName"    "bob_login"
+        "PersonaName"    "Bob"
+        "MostRecent"     "0"
+        "RememberPassword" "0"
+    }}
+}}
+''',
+                encoding="utf-8",
+            )
+
+            with patch("steam_manager.sys.platform", "win32"), \
+                 patch("steam_manager._set_steam_autologin_user", return_value=True):
+                self.assertTrue(switch_steam_account(tmpdir, target_steamid64))
+
+            users = _parse_vdf_simple(loginusers.read_text(encoding="utf-8"))["users"]
+            self.assertEqual(users[target_steamid64]["RememberPassword"], "1")
+            self.assertEqual(users[target_steamid64]["AllowAutoLogin"], "1")
+
+
+class TestDeleteSteamAccount(unittest.TestCase):
+    def test_deletes_userdata_and_loginusers_entry(self):
+        target_sid3 = "39734272"
+        target_sid64 = str(39734272 + 76561197960265728)
+        other_sid64 = str(39734273 + 76561197960265728)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target_userdata = Path(tmpdir) / "userdata" / target_sid3 / "730"
+            target_userdata.mkdir(parents=True)
+            other_userdata = Path(tmpdir) / "userdata" / "39734273" / "730"
+            other_userdata.mkdir(parents=True)
+
+            config_dir = Path(tmpdir) / "config"
+            config_dir.mkdir()
+            loginusers = config_dir / "loginusers.vdf"
+            loginusers.write_text(
+                f'''
+"users"
+{{
+    "{target_sid64}"
+    {{
+        "AccountName"    "target_login"
+    }}
+    "{other_sid64}"
+    {{
+        "AccountName"    "other_login"
+    }}
+}}
+''',
+                encoding="utf-8",
+            )
+
+            self.assertTrue(delete_steam_account(tmpdir, target_sid3, target_sid64))
+            self.assertFalse((Path(tmpdir) / "userdata" / target_sid3).exists())
+            self.assertTrue((Path(tmpdir) / "userdata" / "39734273").exists())
+
+            users = _parse_vdf_simple(loginusers.read_text(encoding="utf-8"))["users"]
+            self.assertNotIn(target_sid64, users)
+            self.assertIn(other_sid64, users)
+
+    def test_returns_false_when_userdata_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertFalse(delete_steam_account(tmpdir, "12345678", "76561198000000000"))
 
 
 class TestConfigFileGroups(unittest.TestCase):
