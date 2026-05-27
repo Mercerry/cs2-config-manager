@@ -264,11 +264,11 @@ CONFIG_FILE_GROUPS = {
     "Video Settings (cs2_video.txt)": [
         ("cs2_cfg_path", "cs2_video.txt"),
     ],
-    "Key Bindings (cs2_user_keys_0_slot0.vcfg)": [
-        ("cs2_cfg_path", "cs2_user_keys_0_slot0.vcfg"),
+    "Key Bindings (cs2_user_keys_*_slot*.vcfg)": [
+        ("cs2_cfg_path", "cs2_user_keys_*_slot*.vcfg"),
     ],
-    "Console Variables (cs2_user_convars_0_slot0.vcfg)": [
-        ("cs2_cfg_path", "cs2_user_convars_0_slot0.vcfg"),
+    "Console Variables (cs2_user_convars_*_slot*.vcfg)": [
+        ("cs2_cfg_path", "cs2_user_convars_*_slot*.vcfg"),
     ],
     "Machine Console Variables (cs2_machine_convars.vcfg)": [
         ("cs2_cfg_path", "cs2_machine_convars.vcfg"),

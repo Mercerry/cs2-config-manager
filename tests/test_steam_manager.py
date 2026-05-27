@@ -242,8 +242,8 @@ class TestConfigFileGroups(unittest.TestCase):
             for _path_key, filename in entries:
                 all_files.add(filename)
 
-        self.assertIn("cs2_user_keys_0_slot0.vcfg", all_files)
-        self.assertIn("cs2_user_convars_0_slot0.vcfg", all_files)
+        self.assertIn("cs2_user_keys_*_slot*.vcfg", all_files)
+        self.assertIn("cs2_user_convars_*_slot*.vcfg", all_files)
         self.assertIn("cs2_video.txt", all_files)
         self.assertIn("cs2_machine_convars.vcfg", all_files)
 

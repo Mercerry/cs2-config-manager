@@ -24,8 +24,8 @@
 | `autoexec.cfg` | 自定义启动配置 |
 | `config.cfg` | 游戏主配置（按键绑定、设置） |
 | `cs2_video.txt` | 视频/画面设置 |
-| `cs2_user_keys_0_slot0.vcfg` | 按键绑定数据 |
-| `cs2_user_convars_0_slot0.vcfg` | 用户控制台变量 |
+| `cs2_user_keys_*_slot*.vcfg` | 按键绑定数据（自动匹配不同用户/槽位） |
+| `cs2_user_convars_*_slot*.vcfg` | 用户控制台变量（自动匹配不同用户/槽位） |
 | `cs2_machine_convars.vcfg` | 机器级控制台变量 |
 | `practiceserver.cfg` | 练习服务器配置 |
 

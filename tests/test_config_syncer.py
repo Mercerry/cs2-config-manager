@@ -241,6 +241,28 @@ class TestSyncConfigs(unittest.TestCase):
         self.assertEqual(len(results["skipped"]), 1)
         self.assertEqual(len(results["failed"]), 0)
 
+    def test_sync_supports_wildcard_settings_files(self):
+        src = _make_account(self._tmpdir, "160")
+        dst = _make_account(self._tmpdir, "170")
+
+        (Path(src["cs2_cfg_path"]) / "cs2_user_keys_1_slot2.vcfg").write_text(
+            "bind x +jump\n", encoding="utf-8"
+        )
+        (Path(src["cs2_cfg_path"]) / "cs2_user_convars_1_slot2.vcfg").write_text(
+            "sensitivity 1.5\n", encoding="utf-8"
+        )
+
+        groups = [
+            "Key Bindings (cs2_user_keys_*_slot*.vcfg)",
+            "Console Variables (cs2_user_convars_*_slot*.vcfg)",
+        ]
+        results = sync_configs(src, dst, groups, CONFIG_FILE_GROUPS, backup=False)
+
+        self.assertTrue((Path(dst["cs2_cfg_path"]) / "cs2_user_keys_1_slot2.vcfg").is_file())
+        self.assertTrue((Path(dst["cs2_cfg_path"]) / "cs2_user_convars_1_slot2.vcfg").is_file())
+        self.assertEqual(len(results["copied"]), 2)
+        self.assertEqual(len(results["failed"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
