@@ -7,7 +7,8 @@ import os
 import re
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
@@ -20,6 +21,32 @@ SUBPROCESS_NO_WINDOW = (
     if sys.platform == "win32"
     else 0
 )
+
+
+class _PlayerAvatarImgParser(HTMLParser):
+    """Extract avatar image URLs from the Steam profile playerAvatar section."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.avatar_urls: list[str] = []
+        self._player_avatar_div_depth = 0
+
+    def handle_starttag(self, tag: str, attrs):
+        attrs_dict = dict(attrs)
+        tag_lower = tag.lower()
+        if tag_lower == "div":
+            classes = (attrs_dict.get("class") or "").split()
+            if "playerAvatar" in classes or self._player_avatar_div_depth > 0:
+                self._player_avatar_div_depth += 1
+            return
+        if tag_lower == "img" and self._player_avatar_div_depth > 0:
+            src = unescape((attrs_dict.get("src") or "").strip())
+            if src.startswith(("http://", "https://")):
+                self.avatar_urls.append(src)
+
+    def handle_endtag(self, tag: str):
+        if tag.lower() == "div" and self._player_avatar_div_depth > 0:
+            self._player_avatar_div_depth -= 1
 
 
 def _read_registry_steam_path() -> Optional[str]:
@@ -158,55 +185,36 @@ def _steamid64_to_steamid3(steamid64: str) -> Optional[str]:
 
 def get_steam_avatar_url(steamid64: str) -> Optional[str]:
     """
-    Fetch avatar URL from Steam Community profile XML.
+    Fetch avatar URL from Steam Community profile HTML.
 
-    Returns avatarFull URL when available.
+    Extracts the first valid image URL from the playerAvatar section and
+    prefers full-size avatars when present.
     """
     if not steamid64:
         return None
 
-    profile_url = f"https://steamcommunity.com/profiles/{steamid64}/?xml=1"
+    profile_url = f"https://steamcommunity.com/profiles/{steamid64}"
     request = Request(profile_url, headers={"User-Agent": STEAM_HTTP_USER_AGENT})
 
     try:
         with urlopen(request, timeout=5) as response:
             raw_content = response.read()
             # Steam profile data may include unexpected bytes; `replace` avoids
-            # decode exceptions so we can still attempt XML/regex extraction.
+            # decode exceptions so we can still attempt HTML extraction.
             content = raw_content.decode("utf-8", errors="replace")
     except (URLError, TimeoutError, OSError):
         return None
 
-    avatar_tags = ("avatarFull", "avatarMedium", "avatarIcon")
-    try:
-        root = ET.fromstring(content)
-        avatar_urls_by_tag: dict[str, str] = {}
-        for tag in avatar_tags:
-            # Keep first occurrence only; Steam profile fields are expected single-valued.
-            elem = root.find(tag)
-            if elem is not None:
-                avatar_urls_by_tag[tag.lower()] = (elem.text or "").strip()
-        for tag in avatar_tags:
-            avatar_url = avatar_urls_by_tag.get(tag.lower(), "")
-            if avatar_url.startswith(("http://", "https://")):
-                return avatar_url
-    except ET.ParseError:
-        pass
-
-    for tag in avatar_tags:
-        # group(1): URL inside CDATA; group(2): plain-text URL.
-        # This supports profile XML variants that use either representation.
-        match = re.search(
-            rf"<{tag}>\s*(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))\s*</{tag}>",
-            content,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if not match:
-            continue
-        avatar_url = (match.group(1) or match.group(2) or "").strip()
-        if avatar_url.startswith(("http://", "https://")):
+    parser = _PlayerAvatarImgParser()
+    parser.feed(content)
+    parser.close()
+    avatar_urls = parser.avatar_urls
+    if not avatar_urls:
+        return None
+    for avatar_url in avatar_urls:
+        if "_full." in avatar_url.lower():
             return avatar_url
-    return None
+    return avatar_urls[0]
 
 
 def get_cs2_accounts(steam_path: str) -> list[dict]:

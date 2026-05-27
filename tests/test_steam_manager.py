@@ -162,14 +162,14 @@ class TestGetCs2Accounts(unittest.TestCase):
 
 
 class TestGetSteamAvatarUrl(unittest.TestCase):
-    def test_parses_avatar_url_from_profile_xml(self):
-        xml = (
-            "<profile>"
-            "<avatarFull><![CDATA[https://avatars.steamstatic.com/abc_full.jpg]]></avatarFull>"
-            "</profile>"
+    def test_parses_avatar_url_from_profile_html(self):
+        html = (
+            '<div class="playerAvatar">\n'
+            '  <img src="https://avatars.steamstatic.com/abc_full.jpg">\n'
+            "</div>"
         )
         fake_response = MagicMock()
-        fake_response.read.return_value = xml.encode("utf-8")
+        fake_response.read.return_value = html.encode("utf-8")
         fake_response.__enter__.return_value = fake_response
 
         with patch("steam_manager.urlopen", return_value=fake_response):
@@ -184,42 +184,43 @@ class TestGetSteamAvatarUrl(unittest.TestCase):
 
     def test_returns_none_when_missing_avatar_tag(self):
         fake_response = MagicMock()
-        fake_response.read.return_value = b"<profile></profile>"
+        fake_response.read.return_value = b"<html></html>"
         fake_response.__enter__.return_value = fake_response
 
         with patch("steam_manager.urlopen", return_value=fake_response):
             url = get_steam_avatar_url("76561198000000000")
         self.assertIsNone(url)
 
-    def test_falls_back_to_medium_avatar_when_full_missing(self):
-        xml = (
-            "<profile>\n"
-            "  <avatarMedium><![CDATA[https://avatars.steamstatic.com/abc_medium.jpg]]></avatarMedium>\n"
-            "</profile>"
+    def test_prefers_full_avatar_when_multiple_images(self):
+        html = (
+            '<div class="playerAvatar">\n'
+            '  <img src="https://avatars.steamstatic.com/abc_medium.jpg">\n'
+            '  <img src="https://avatars.steamstatic.com/abc_full.jpg">\n'
+            "</div>"
         )
         fake_response = MagicMock()
-        fake_response.read.return_value = xml.encode("utf-8")
+        fake_response.read.return_value = html.encode("utf-8")
         fake_response.__enter__.return_value = fake_response
 
         with patch("steam_manager.urlopen", return_value=fake_response):
             url = get_steam_avatar_url("76561198000000000")
 
-        self.assertEqual(url, "https://avatars.steamstatic.com/abc_medium.jpg")
+        self.assertEqual(url, "https://avatars.steamstatic.com/abc_full.jpg")
 
-    def test_parses_avatar_url_without_cdata(self):
-        xml = (
-            "<profile>"
-            "<avatarFull>https://avatars.steamstatic.com/plain_full.jpg</avatarFull>"
-            "</profile>"
+    def test_returns_single_avatar_when_no_full_size(self):
+        html = (
+            '<div class="playerAvatar">'
+            '<img src="https://avatars.steamstatic.com/plain_medium.jpg">'
+            "</div>"
         )
         fake_response = MagicMock()
-        fake_response.read.return_value = xml.encode("utf-8")
+        fake_response.read.return_value = html.encode("utf-8")
         fake_response.__enter__.return_value = fake_response
 
         with patch("steam_manager.urlopen", return_value=fake_response):
             url = get_steam_avatar_url("76561198000000000")
 
-        self.assertEqual(url, "https://avatars.steamstatic.com/plain_full.jpg")
+        self.assertEqual(url, "https://avatars.steamstatic.com/plain_medium.jpg")
 
 
 class TestRestartSteam(unittest.TestCase):
