@@ -5,6 +5,7 @@ Supports Windows via Registry lookup and common path fallbacks.
 
 import os
 import re
+import json
 import subprocess
 import sys
 from html import unescape
@@ -12,6 +13,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 CS2_APP_ID = "730"
@@ -24,7 +26,7 @@ SUBPROCESS_NO_WINDOW = (
 
 
 class _PlayerAvatarImgParser(HTMLParser):
-    """Extract avatar image URLs from the Steam profile playerAvatar section."""
+    """Extract avatar image URLs from Steam mini profile avatar section."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -36,11 +38,15 @@ class _PlayerAvatarImgParser(HTMLParser):
         tag_lower = tag.lower()
         if tag_lower == "div":
             classes = (attrs_dict.get("class") or "").split()
-            if "playerAvatar" in classes or self._player_avatar_div_depth > 0:
+            if "playersection_avatar" in classes or self._player_avatar_div_depth > 0:
                 self._player_avatar_div_depth += 1
             return
         if tag_lower == "img" and self._player_avatar_div_depth > 0:
             src = unescape((attrs_dict.get("src") or "").strip())
+            srcset = unescape((attrs_dict.get("srcset") or "").strip())
+            srcset_best = _extract_best_srcset_url(srcset)
+            if srcset_best and srcset_best.startswith(("http://", "https://")):
+                self.avatar_urls.append(srcset_best)
             if src.startswith(("http://", "https://")):
                 self.avatar_urls.append(src)
 
@@ -183,25 +189,63 @@ def _steamid64_to_steamid3(steamid64: str) -> Optional[str]:
         return None
 
 
-def get_steam_avatar_url(steamid64: str) -> Optional[str]:
-    """
-    Fetch avatar URL from Steam Community profile HTML.
+def _extract_best_srcset_url(srcset: str) -> Optional[str]:
+    """Extract highest-resolution URL from an img srcset attribute."""
+    best_url = None
+    best_scale = 0.0
+    for item in srcset.split(","):
+        parts = item.strip().split()
+        if not parts:
+            continue
+        url = parts[0]
+        scale = 1.0
+        if len(parts) > 1 and parts[1].endswith("x"):
+            try:
+                scale = float(parts[1][:-1])
+            except ValueError:
+                scale = 1.0
+        if scale >= best_scale:
+            best_scale = scale
+            best_url = url
+    return best_url
 
-    Extracts the first valid image URL from the playerAvatar section and
-    prefers full-size avatars when present.
-    """
-    if not steamid64:
+
+def _read_steam_api_key() -> Optional[str]:
+    """Read Steam Web API key from api.txt near executable or current directory."""
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).resolve().parent / "api.txt")
+    else:
+        candidates.append(Path(sys.argv[0]).resolve().parent / "api.txt")
+    candidates.append(Path.cwd() / "api.txt")
+
+    seen: set[Path] = set()
+    for key_path in candidates:
+        if key_path in seen:
+            continue
+        seen.add(key_path)
+        if not key_path.is_file():
+            continue
+        try:
+            content = key_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if content:
+            return content.splitlines()[0].strip().lstrip("\ufeff")
+    return None
+
+
+def _get_avatar_from_miniprofile(steamid64: str) -> Optional[str]:
+    """Fetch avatar URL by parsing Steam mini profile HTML."""
+    steamid3 = _steamid64_to_steamid3(steamid64)
+    if not steamid3:
         return None
 
-    profile_url = f"https://steamcommunity.com/profiles/{steamid64}"
+    profile_url = f"https://steamcommunity.com/miniprofile/{steamid3}?l=en"
     request = Request(profile_url, headers={"User-Agent": STEAM_HTTP_USER_AGENT})
-
     try:
         with urlopen(request, timeout=5) as response:
-            raw_content = response.read()
-            # Steam profile data may include unexpected bytes; `replace` avoids
-            # decode exceptions so we can still attempt HTML extraction.
-            content = raw_content.decode("utf-8", errors="replace")
+            content = response.read().decode("utf-8", errors="replace")
     except (URLError, TimeoutError, OSError):
         return None
 
@@ -215,6 +259,46 @@ def get_steam_avatar_url(steamid64: str) -> Optional[str]:
         if "_full." in avatar_url.lower():
             return avatar_url
     return avatar_urls[0]
+
+
+def _get_avatar_from_steam_api(steamid64: str) -> Optional[str]:
+    """Fetch avatar URL from Steam Web API using api.txt key."""
+    api_key = _read_steam_api_key()
+    if not api_key:
+        return None
+
+    query = urlencode({"key": api_key, "steamids": steamid64})
+    api_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?{query}"
+    request = Request(api_url, headers={"User-Agent": STEAM_HTTP_USER_AGENT})
+    try:
+        with urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return None
+
+    players = payload.get("response", {}).get("players", [])
+    if not players:
+        return None
+    player = players[0]
+    for key in ("avatarfull", "avatarmedium", "avatar"):
+        value = player.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    return None
+
+
+def get_steam_avatar_url(steamid64: str) -> Optional[str]:
+    """
+    Fetch avatar URL with fallback strategy:
+    1) Parse Steam mini profile HTML.
+    2) Use Steam Web API with key from api.txt.
+    """
+    if not steamid64:
+        return None
+    avatar_url = _get_avatar_from_miniprofile(steamid64)
+    if avatar_url:
+        return avatar_url
+    return _get_avatar_from_steam_api(steamid64)
 
 
 def get_cs2_accounts(steam_path: str) -> list[dict]:

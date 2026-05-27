@@ -162,10 +162,12 @@ class TestGetCs2Accounts(unittest.TestCase):
 
 
 class TestGetSteamAvatarUrl(unittest.TestCase):
-    def test_parses_avatar_url_from_profile_html(self):
+    def test_parses_avatar_url_from_miniprofile_html(self):
         html = (
-            '<div class="playerAvatar">\n'
-            '  <img src="https://avatars.steamstatic.com/abc_full.jpg">\n'
+            '<div class="playersection_avatar">\n'
+            '  <img src="https://avatars.steamstatic.com/abc_medium.jpg" '
+            'srcset="https://avatars.steamstatic.com/abc_medium.jpg 1x, '
+            'https://avatars.steamstatic.com/abc_full.jpg 2x">\n'
             "</div>"
         )
         fake_response = MagicMock()
@@ -177,23 +179,31 @@ class TestGetSteamAvatarUrl(unittest.TestCase):
 
         self.assertEqual(url, "https://avatars.steamstatic.com/abc_full.jpg")
 
-    def test_returns_none_on_network_error(self):
-        with patch("steam_manager.urlopen", side_effect=OSError("network down")):
+    def test_uses_steam_api_fallback_when_miniprofile_fails(self):
+        api_payload = (
+            '{"response":{"players":[{"avatarfull":"https://avatars.steamstatic.com/'
+            'api_full.jpg"}]}}'
+        )
+        miniprofile_error = OSError("network down")
+        api_response = MagicMock()
+        api_response.read.return_value = api_payload.encode("utf-8")
+        api_response.__enter__.return_value = api_response
+
+        with patch("steam_manager._read_steam_api_key", return_value="test-api-key"), \
+             patch("steam_manager.urlopen", side_effect=[miniprofile_error, api_response]):
             url = get_steam_avatar_url("76561198000000000")
-        self.assertIsNone(url)
 
-    def test_returns_none_when_missing_avatar_tag(self):
-        fake_response = MagicMock()
-        fake_response.read.return_value = b"<html></html>"
-        fake_response.__enter__.return_value = fake_response
+        self.assertEqual(url, "https://avatars.steamstatic.com/api_full.jpg")
 
-        with patch("steam_manager.urlopen", return_value=fake_response):
+    def test_returns_none_when_both_methods_fail(self):
+        with patch("steam_manager._read_steam_api_key", return_value=None), \
+             patch("steam_manager.urlopen", side_effect=OSError("network down")):
             url = get_steam_avatar_url("76561198000000000")
         self.assertIsNone(url)
 
     def test_prefers_full_avatar_when_multiple_images(self):
         html = (
-            '<div class="playerAvatar">\n'
+            '<div class="playersection_avatar">\n'
             '  <img src="https://avatars.steamstatic.com/abc_medium.jpg">\n'
             '  <img src="https://avatars.steamstatic.com/abc_full.jpg">\n'
             "</div>"
@@ -209,7 +219,7 @@ class TestGetSteamAvatarUrl(unittest.TestCase):
 
     def test_returns_single_avatar_when_no_full_size(self):
         html = (
-            '<div class="playerAvatar">'
+            '<div class="playersection_avatar">'
             '<img src="https://avatars.steamstatic.com/plain_medium.jpg">'
             "</div>"
         )
